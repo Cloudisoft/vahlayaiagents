@@ -10,6 +10,7 @@ import JobsList from "./pages/hr/JobsList.js";
 import JobNew from "./pages/hr/JobNew.js";
 import JobDetail from "./pages/hr/JobDetail.js";
 import ApplicationDetail from "./pages/hr/ApplicationDetail.js";
+import CoverageHome from "./pages/coverage/CoverageHome.js";
 import ProtectedRoute from "./components/ProtectedRoute.js";
 import Sidebar from "./components/Sidebar.js";
 import ModulePlaceholder from "./components/ModulePlaceholder.js";
@@ -87,7 +88,7 @@ export default function App() {
         element={
           <ProtectedRoute>
             <AppShell>
-              <ModulePlaceholder title="Vahlay Coverage" phase="Phase 3" />
+              <CoverageHome />
             </AppShell>
           </ProtectedRoute>
         }

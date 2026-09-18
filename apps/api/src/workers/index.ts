@@ -5,6 +5,7 @@
 // registered yet — registerWorker() below is where Phase 2+ hooks in.
 import { isQueueEnabled } from "../services/queue.js";
 import { startResumeWorker } from "./resumeWorker.js";
+import { startCoverageWorker } from "./coverageWorker.js";
 
 if (!isQueueEnabled()) {
   console.warn(
@@ -13,7 +14,8 @@ if (!isQueueEnabled()) {
   );
 } else {
   startResumeWorker();
-  console.log("[worker] Redis connected. resume-processing queue worker started.");
+  startCoverageWorker();
+  console.log("[worker] Redis connected. resume-processing and coverage-bulk-lookup workers started.");
 }
 
 // Keep the process alive.

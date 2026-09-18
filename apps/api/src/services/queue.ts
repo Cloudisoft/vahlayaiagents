@@ -50,7 +50,7 @@ export async function enqueueJob(params: EnqueueParams): Promise<string> {
   const queue = getQueue(params.queueName);
   await queue.add(
     params.jobType,
-    { ...params.payload, backgroundJobId: jobId },
+    { ...params.payload, organizationId: params.organizationId, backgroundJobId: jobId },
     { attempts: params.maxAttempts ?? 3, backoff: { type: "exponential", delay: 5000 } }
   );
 
