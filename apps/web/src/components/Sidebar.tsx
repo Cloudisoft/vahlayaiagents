@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.js";
+import NotificationBell from "./NotificationBell.js";
 
 const NAV = [
   { to: "/", label: "Dashboard", exact: true },
@@ -7,6 +8,7 @@ const NAV = [
   { to: "/coverage", label: "Vahlay Coverage" },
   { to: "/leadgen", label: "Vahlay LeadGen" },
   { to: "/voice", label: "Vahlay Voice AI" },
+  { to: "/usage", label: "Usage & Balances" },
   { to: "/settings", label: "Settings" },
 ];
 
@@ -35,8 +37,9 @@ export default function Sidebar() {
           </NavLink>
         ))}
       </nav>
-      <div className="px-4 py-4 border-t border-slate-200">
-        <div className="text-xs text-slate-500 mb-2 truncate">
+      <div className="px-4 py-4 border-t border-slate-200 space-y-2">
+        <NotificationBell />
+        <div className="text-xs text-slate-500 truncate">
           {user?.first_name} {user?.last_name} · {user?.role}
         </div>
         <button

@@ -22,7 +22,11 @@ import { campaignsRouter } from "./routes/campaigns.js";
 import { dispositionsRouter } from "./routes/dispositions.js";
 import { callsRouter } from "./routes/calls.js";
 import { auditorRouter } from "./routes/auditor.js";
+import { dashboardRouter } from "./routes/dashboard.js";
+import { usageRouter } from "./routes/usage.js";
+import { notificationsRouter } from "./routes/notifications.js";
 import { initRealtime } from "./services/realtimeService.js";
+import { authRateLimit, publicRateLimit } from "./middleware/rateLimit.js";
 
 const app = express();
 
@@ -39,12 +43,12 @@ app.use("/api/webhooks/plivo", express.urlencoded({ extended: false }), plivoWeb
 
 app.use(express.json({ limit: "2mb" }));
 
-app.use("/api/auth", authRouter);
+app.use("/api/auth", authRateLimit, authRouter);
 app.use("/api/org", orgRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/files", filesRouter);
 app.use("/api/jobs", jobsRouter);
-app.use("/api/public/jobs", publicJobsRouter);
+app.use("/api/public/jobs", publicRateLimit, publicJobsRouter);
 app.use("/api/applications", applicationsRouter);
 app.use("/api/coverage", coverageRouter);
 app.use("/api/leadgen", leadgenRouter);
@@ -55,6 +59,9 @@ app.use("/api/voice/campaigns", campaignsRouter);
 app.use("/api/voice/dispositions", dispositionsRouter);
 app.use("/api/voice/calls", callsRouter);
 app.use("/api/auditor", auditorRouter);
+app.use("/api/dashboard", dashboardRouter);
+app.use("/api/usage", usageRouter);
+app.use("/api/notifications", notificationsRouter);
 
 // Additional provider webhooks land as their modules do (spec §47):
 // /api/webhooks/twilio, /api/webhooks/vapi.

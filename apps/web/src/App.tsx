@@ -5,6 +5,7 @@ import ForgotPassword from "./pages/ForgotPassword.js";
 import ResetPassword from "./pages/ResetPassword.js";
 import Dashboard from "./pages/Dashboard.js";
 import Settings from "./pages/Settings.js";
+import Usage from "./pages/Usage.js";
 import ApplyPublic from "./pages/ApplyPublic.js";
 import JobsList from "./pages/hr/JobsList.js";
 import JobNew from "./pages/hr/JobNew.js";
@@ -187,6 +188,16 @@ export default function App() {
           <ProtectedRoute>
             <AppShell>
               <Settings />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/usage"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <Usage />
             </AppShell>
           </ProtectedRoute>
         }
