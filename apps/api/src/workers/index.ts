@@ -4,6 +4,7 @@
 // here as that module is built. Phase 1 ships the harness with no queues
 // registered yet — registerWorker() below is where Phase 2+ hooks in.
 import { isQueueEnabled } from "../services/queue.js";
+import { startResumeWorker } from "./resumeWorker.js";
 
 if (!isQueueEnabled()) {
   console.warn(
@@ -11,7 +12,8 @@ if (!isQueueEnabled()) {
       "no jobs will run. This process will stay idle."
   );
 } else {
-  console.log("[worker] Redis connected. Waiting for queue processors to be registered by later phases.");
+  startResumeWorker();
+  console.log("[worker] Redis connected. resume-processing queue worker started.");
 }
 
 // Keep the process alive.

@@ -5,6 +5,11 @@ import ForgotPassword from "./pages/ForgotPassword.js";
 import ResetPassword from "./pages/ResetPassword.js";
 import Dashboard from "./pages/Dashboard.js";
 import Settings from "./pages/Settings.js";
+import ApplyPublic from "./pages/ApplyPublic.js";
+import JobsList from "./pages/hr/JobsList.js";
+import JobNew from "./pages/hr/JobNew.js";
+import JobDetail from "./pages/hr/JobDetail.js";
+import ApplicationDetail from "./pages/hr/ApplicationDetail.js";
 import ProtectedRoute from "./components/ProtectedRoute.js";
 import Sidebar from "./components/Sidebar.js";
 import ModulePlaceholder from "./components/ModulePlaceholder.js";
@@ -25,6 +30,7 @@ export default function App() {
       <Route path="/signup" element={<Signup />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/apply/:slug" element={<ApplyPublic />} />
 
       <Route
         path="/"
@@ -41,7 +47,37 @@ export default function App() {
         element={
           <ProtectedRoute>
             <AppShell>
-              <ModulePlaceholder title="VahlayHR" phase="Phase 2" />
+              <JobsList />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr/jobs/new"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <JobNew />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr/jobs/:id"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <JobDetail />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr/applications/:id"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <ApplicationDetail />
             </AppShell>
           </ProtectedRoute>
         }
