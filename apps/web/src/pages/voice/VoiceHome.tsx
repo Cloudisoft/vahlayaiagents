@@ -111,6 +111,9 @@ export default function VoiceHome() {
         <Link to="/voice/history" className="px-4 py-2 text-sm font-medium text-slate-500 hover:text-slate-700 border-b-2 border-transparent">
           Call History
         </Link>
+        <Link to="/voice/auditor" className="px-4 py-2 text-sm font-medium text-slate-500 hover:text-slate-700 border-b-2 border-transparent">
+          Call Auditor
+        </Link>
       </div>
 
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}

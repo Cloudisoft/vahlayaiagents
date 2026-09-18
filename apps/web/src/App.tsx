@@ -18,6 +18,7 @@ import CampaignNew from "./pages/voice/CampaignNew.js";
 import CampaignDetail from "./pages/voice/CampaignDetail.js";
 import LiveCalls from "./pages/voice/LiveCalls.js";
 import CallHistory from "./pages/voice/CallHistory.js";
+import AuditorHome from "./pages/auditor/AuditorHome.js";
 import ProtectedRoute from "./components/ProtectedRoute.js";
 import Sidebar from "./components/Sidebar.js";
 import ModulePlaceholder from "./components/ModulePlaceholder.js";
@@ -166,6 +167,16 @@ export default function App() {
           <ProtectedRoute>
             <AppShell>
               <CallHistory />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/auditor"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <AuditorHome />
             </AppShell>
           </ProtectedRoute>
         }

@@ -21,6 +21,7 @@ import { phoneNumbersRouter } from "./routes/phoneNumbers.js";
 import { campaignsRouter } from "./routes/campaigns.js";
 import { dispositionsRouter } from "./routes/dispositions.js";
 import { callsRouter } from "./routes/calls.js";
+import { auditorRouter } from "./routes/auditor.js";
 import { initRealtime } from "./services/realtimeService.js";
 
 const app = express();
@@ -53,6 +54,7 @@ app.use("/api/voice/phone-numbers", phoneNumbersRouter);
 app.use("/api/voice/campaigns", campaignsRouter);
 app.use("/api/voice/dispositions", dispositionsRouter);
 app.use("/api/voice/calls", callsRouter);
+app.use("/api/auditor", auditorRouter);
 
 // Additional provider webhooks land as their modules do (spec §47):
 // /api/webhooks/twilio, /api/webhooks/vapi.

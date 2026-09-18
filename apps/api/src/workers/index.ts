@@ -7,6 +7,7 @@ import { isQueueEnabled } from "../services/queue.js";
 import { startResumeWorker } from "./resumeWorker.js";
 import { startCoverageWorker } from "./coverageWorker.js";
 import { startLeadgenWorker } from "./leadgenWorker.js";
+import { startAuditorWorker } from "./auditorWorker.js";
 import { tickCampaignDialer } from "../voiceai/callQueueService.js";
 import { pool } from "../db/pool.js";
 
@@ -19,7 +20,8 @@ if (!isQueueEnabled()) {
   startResumeWorker();
   startCoverageWorker();
   startLeadgenWorker();
-  console.log("[worker] Redis connected. resume-processing, coverage-bulk-lookup and leadgen-discovery workers started.");
+  startAuditorWorker();
+  console.log("[worker] Redis connected. resume-processing, coverage-bulk-lookup, leadgen-discovery and call-audit workers started.");
 }
 
 // Voice AI campaign dialer: independent of Redis — it only needs the
