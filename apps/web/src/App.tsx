@@ -12,6 +12,10 @@ import JobDetail from "./pages/hr/JobDetail.js";
 import ApplicationDetail from "./pages/hr/ApplicationDetail.js";
 import CoverageHome from "./pages/coverage/CoverageHome.js";
 import LeadGenHome from "./pages/leadgen/LeadGenHome.js";
+import VoiceHome from "./pages/voice/VoiceHome.js";
+import AgentNew from "./pages/voice/AgentNew.js";
+import CampaignNew from "./pages/voice/CampaignNew.js";
+import CampaignDetail from "./pages/voice/CampaignDetail.js";
 import ProtectedRoute from "./components/ProtectedRoute.js";
 import Sidebar from "./components/Sidebar.js";
 import ModulePlaceholder from "./components/ModulePlaceholder.js";
@@ -109,7 +113,37 @@ export default function App() {
         element={
           <ProtectedRoute>
             <AppShell>
-              <ModulePlaceholder title="Vahlay Voice AI" phase="Phase 5-7" />
+              <VoiceHome />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/agents/new"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <AgentNew />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/campaigns/new"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <CampaignNew />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/campaigns/:id"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <CampaignDetail />
             </AppShell>
           </ProtectedRoute>
         }

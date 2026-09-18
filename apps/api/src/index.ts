@@ -13,6 +13,11 @@ import { applicationsRouter } from "./routes/applications.js";
 import { plivoWebhookRouter } from "./routes/webhooks/plivo.js";
 import { coverageRouter } from "./routes/coverage.js";
 import { leadgenRouter } from "./routes/leadgen.js";
+import { agentsRouter } from "./routes/agents.js";
+import { voicesRouter } from "./routes/voices.js";
+import { phoneNumbersRouter } from "./routes/phoneNumbers.js";
+import { campaignsRouter } from "./routes/campaigns.js";
+import { dispositionsRouter } from "./routes/dispositions.js";
 
 const app = express();
 
@@ -37,6 +42,11 @@ app.use("/api/public/jobs", publicJobsRouter);
 app.use("/api/applications", applicationsRouter);
 app.use("/api/coverage", coverageRouter);
 app.use("/api/leadgen", leadgenRouter);
+app.use("/api/voice/agents", agentsRouter);
+app.use("/api/voice/voices", voicesRouter);
+app.use("/api/voice/phone-numbers", phoneNumbersRouter);
+app.use("/api/voice/campaigns", campaignsRouter);
+app.use("/api/voice/dispositions", dispositionsRouter);
 
 // Additional provider webhooks land as their modules do (spec §47):
 // /api/webhooks/twilio, /api/webhooks/vapi.
