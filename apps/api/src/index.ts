@@ -1,4 +1,5 @@
 import express from "express";
+import http from "node:http";
 import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
@@ -11,6 +12,7 @@ import { jobsRouter } from "./routes/jobs.js";
 import { publicJobsRouter } from "./routes/publicJobs.js";
 import { applicationsRouter } from "./routes/applications.js";
 import { plivoWebhookRouter } from "./routes/webhooks/plivo.js";
+import { plivoVoiceAgentWebhookRouter } from "./routes/webhooks/plivoVoiceAgent.js";
 import { coverageRouter } from "./routes/coverage.js";
 import { leadgenRouter } from "./routes/leadgen.js";
 import { agentsRouter } from "./routes/agents.js";
@@ -18,6 +20,8 @@ import { voicesRouter } from "./routes/voices.js";
 import { phoneNumbersRouter } from "./routes/phoneNumbers.js";
 import { campaignsRouter } from "./routes/campaigns.js";
 import { dispositionsRouter } from "./routes/dispositions.js";
+import { callsRouter } from "./routes/calls.js";
+import { initRealtime } from "./services/realtimeService.js";
 
 const app = express();
 
@@ -29,6 +33,7 @@ app.get("/api/health", (_req, res) => res.json({ status: "ok", timestamp: new Da
 
 // Plivo posts form-encoded webhook bodies — parse before the JSON body
 // parser (which would otherwise leave req.body empty for these routes).
+app.use("/api/webhooks/plivo/voice-agent", express.urlencoded({ extended: false }), plivoVoiceAgentWebhookRouter);
 app.use("/api/webhooks/plivo", express.urlencoded({ extended: false }), plivoWebhookRouter);
 
 app.use(express.json({ limit: "2mb" }));
@@ -47,6 +52,7 @@ app.use("/api/voice/voices", voicesRouter);
 app.use("/api/voice/phone-numbers", phoneNumbersRouter);
 app.use("/api/voice/campaigns", campaignsRouter);
 app.use("/api/voice/dispositions", dispositionsRouter);
+app.use("/api/voice/calls", callsRouter);
 
 // Additional provider webhooks land as their modules do (spec §47):
 // /api/webhooks/twilio, /api/webhooks/vapi.
@@ -56,6 +62,9 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ error: env.nodeEnv === "production" ? "Internal server error." : err.message });
 });
 
-app.listen(env.port, () => {
+const server = http.createServer(app);
+initRealtime(server);
+
+server.listen(env.port, () => {
   console.log(`Vahlay AI API listening on port ${env.port} (${env.nodeEnv})`);
 });
