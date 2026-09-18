@@ -1,4 +1,4 @@
-import { Route, Routes } from "react-router-dom";
+import { Link, Route, Routes, useLocation } from "react-router-dom";
 import Login from "./pages/Login.js";
 import Signup from "./pages/Signup.js";
 import ForgotPassword from "./pages/ForgotPassword.js";
@@ -6,6 +6,8 @@ import ResetPassword from "./pages/ResetPassword.js";
 import Dashboard from "./pages/Dashboard.js";
 import Settings from "./pages/Settings.js";
 import Usage from "./pages/Usage.js";
+import Profile from "./pages/Profile.js";
+import AdminPanel from "./pages/AdminPanel.js";
 import ApplyPublic from "./pages/ApplyPublic.js";
 import JobsList from "./pages/hr/JobsList.js";
 import JobNew from "./pages/hr/JobNew.js";
@@ -21,14 +23,22 @@ import LiveCalls from "./pages/voice/LiveCalls.js";
 import CallHistory from "./pages/voice/CallHistory.js";
 import AuditorHome from "./pages/auditor/AuditorHome.js";
 import ProtectedRoute from "./components/ProtectedRoute.js";
-import Sidebar from "./components/Sidebar.js";
-import ModulePlaceholder from "./components/ModulePlaceholder.js";
+import Navbar from "./components/Navbar.js";
 
 function AppShell({ children }: { children: React.ReactNode }) {
+  const location = useLocation();
+  const isHome = location.pathname === "/";
   return (
-    <div className="flex">
-      <Sidebar />
-      <main className="flex-1 p-8">{children}</main>
+    <div className="min-h-screen bg-slate-50">
+      <Navbar />
+      {!isHome && (
+        <div className="max-w-6xl mx-auto px-6 pt-4">
+          <Link to="/" className="text-sm text-slate-500 hover:text-red-600">
+            ← Back to Dashboard
+          </Link>
+        </div>
+      )}
+      <main className="max-w-6xl mx-auto p-6">{children}</main>
     </div>
   );
 }
@@ -198,6 +208,26 @@ export default function App() {
           <ProtectedRoute>
             <AppShell>
               <Usage />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <Profile />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <AdminPanel />
             </AppShell>
           </ProtectedRoute>
         }

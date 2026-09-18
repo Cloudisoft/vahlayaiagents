@@ -4,6 +4,7 @@ import { parse } from "csv-parse/sync";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { getCoverageStats, lookupPhone } from "../services/coverageService.js";
 import { enqueueJob, isQueueEnabled } from "../services/queue.js";
 import { getStorageDriver, recordFile } from "../services/storageService.js";
@@ -12,6 +13,7 @@ import crypto from "node:crypto";
 
 export const coverageRouter = Router();
 coverageRouter.use(requireAuth);
+coverageRouter.use(requireModuleAccess("coverage"));
 
 coverageRouter.post("/lookup", async (req: AuthedRequest, res) => {
   const parsed = z.object({ phone: z.string().min(4) }).safeParse(req.body);

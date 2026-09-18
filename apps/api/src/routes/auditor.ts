@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { getStorageDriver, recordFile } from "../services/storageService.js";
 import { ensureDefaultAuditCriteria } from "../services/auditCriteriaService.js";
 import { processCallAudit } from "../services/auditPipeline.js";
@@ -13,6 +14,7 @@ import { enqueueJob, isQueueEnabled } from "../services/queue.js";
 
 export const auditorRouter = Router();
 auditorRouter.use(requireAuth);
+auditorRouter.use(requireModuleAccess("call_auditor"));
 
 // --- Criteria ---
 

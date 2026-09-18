@@ -103,7 +103,7 @@ export default function CoverageHome() {
             placeholder="+1 555 123 4567"
             className="flex-1 border border-slate-300 rounded-md px-3 py-2 text-sm"
           />
-          <button onClick={lookup} disabled={busy} className="bg-indigo-600 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-indigo-700 disabled:opacity-50">
+          <button onClick={lookup} disabled={busy} className="bg-red-600 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-red-700 disabled:opacity-50">
             {busy ? "Looking up..." : "Lookup"}
           </button>
         </div>

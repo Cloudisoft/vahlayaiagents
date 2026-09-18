@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { requireRole } from "../middleware/rbac.js";
 import { analyzeJobDescription } from "../services/jobAnalysisService.js";
 
@@ -34,6 +35,7 @@ const jobSchema = z.object({
 });
 
 jobsRouter.use(requireAuth);
+jobsRouter.use(requireModuleAccess("hr"));
 jobsRouter.use(requireRole("hr", "recruiter"));
 
 jobsRouter.get("/", async (req: AuthedRequest, res) => {

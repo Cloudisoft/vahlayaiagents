@@ -127,7 +127,7 @@ export default function JobDetail() {
       {publicUrl && (
         <div className="bg-white border border-slate-200 rounded-xl p-4 text-sm">
           <span className="text-slate-500">Public application URL: </span>
-          <a href={publicUrl} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">
+          <a href={publicUrl} target="_blank" rel="noreferrer" className="text-red-600 hover:underline">
             {publicUrl}
           </a>
         </div>
@@ -191,7 +191,7 @@ export default function JobDetail() {
               {applications.map((a) => (
                 <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-2">
-                    <Link to={`/hr/applications/${a.id}`} className="text-slate-900 hover:text-indigo-600">
+                    <Link to={`/hr/applications/${a.id}`} className="text-slate-900 hover:text-red-600">
                       {a.first_name} {a.last_name}
                     </Link>
                     <div className="text-xs text-slate-500">{a.email}</div>

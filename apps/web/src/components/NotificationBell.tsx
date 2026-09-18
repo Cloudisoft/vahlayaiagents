@@ -52,7 +52,7 @@ export default function NotificationBell() {
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100">
             <span className="text-xs font-medium text-slate-500 uppercase">Notifications</span>
             {unreadCount > 0 && (
-              <button onClick={markAllRead} className="text-xs text-indigo-600 hover:underline">
+              <button onClick={markAllRead} className="text-xs text-red-600 hover:underline">
                 Mark all read
               </button>
             )}
@@ -61,7 +61,7 @@ export default function NotificationBell() {
             <div className="p-4 text-sm text-slate-500 text-center">No notifications yet.</div>
           ) : (
             notifications.map((n) => (
-              <div key={n.id} className={`px-3 py-2 border-b border-slate-50 text-sm ${n.read_at ? "" : "bg-indigo-50"}`}>
+              <div key={n.id} className={`px-3 py-2 border-b border-slate-50 text-sm ${n.read_at ? "" : "bg-red-50"}`}>
                 <div className="font-medium text-slate-900">{n.title}</div>
                 {n.body && <div className="text-xs text-slate-500">{n.body}</div>}
                 <div className="text-[10px] text-slate-400">{new Date(n.created_at).toLocaleString()}</div>

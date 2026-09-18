@@ -2,10 +2,12 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { ensureDefaultDispositions } from "../services/dispositionsService.js";
 
 export const dispositionsRouter = Router();
 dispositionsRouter.use(requireAuth);
+dispositionsRouter.use(requireModuleAccess("voice_agents"));
 
 dispositionsRouter.get("/", async (req: AuthedRequest, res) => {
   await ensureDefaultDispositions(req.auth!.organizationId);

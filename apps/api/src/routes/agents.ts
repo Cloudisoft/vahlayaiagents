@@ -2,10 +2,12 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { requireRole } from "../middleware/rbac.js";
 
 export const agentsRouter = Router();
 agentsRouter.use(requireAuth);
+agentsRouter.use(requireModuleAccess("voice_agents"));
 agentsRouter.use(requireRole("agent_manager", "hr"));
 
 const AGENT_TYPES = [

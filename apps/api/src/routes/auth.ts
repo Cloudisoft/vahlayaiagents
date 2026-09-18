@@ -28,6 +28,7 @@ const cookieOpts = {
 const signupSchema = z.object({
   organizationName: z.string().min(2),
   email: z.string().email(),
+  username: z.string().min(3).max(32).regex(/^[a-z0-9_.]+$/i, "Username can only contain letters, numbers, underscores and periods.").optional(),
   password: z.string().min(8),
   firstName: z.string().optional(),
   lastName: z.string().optional(),
@@ -46,13 +47,13 @@ authRouter.post("/signup", async (req, res) => {
   }
 });
 
-const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1) });
+const loginSchema = z.object({ identifier: z.string().min(1), password: z.string().min(1) });
 
 authRouter.post("/login", async (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
   try {
-    const user = await login(parsed.data.email, parsed.data.password);
+    const user = await login(parsed.data.identifier, parsed.data.password);
     const { refreshToken, expiresAt } = await createSession(user.id, req.headers["user-agent"], req.ip);
     res.cookie(REFRESH_COOKIE, refreshToken, { ...cookieOpts, expires: expiresAt });
     res.json({ accessToken: signAccessToken(user), user });
@@ -108,12 +109,15 @@ authRouter.post("/reset-password", async (req, res) => {
 
 authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
   const result = await pool.query(
-    `select u.id, u.email, u.first_name, u.last_name, u.organization_id, r.key as role,
-            o.name as organization_name
+    `select u.id, u.email, u.username, u.first_name, u.last_name, u.organization_id, r.key as role,
+            o.name as organization_name, o.settings as organization_settings,
+            coalesce(array_agg(uma.module_key) filter (where uma.enabled), '{}') as enabled_modules
      from users u
      join roles r on r.id = u.role_id
      join organizations o on o.id = u.organization_id
-     where u.id = $1`,
+     left join user_module_access uma on uma.user_id = u.id
+     where u.id = $1
+     group by u.id, r.key, o.name, o.settings`,
     [req.auth!.userId]
   );
   if (result.rows.length === 0) return res.status(404).json({ error: "User not found." });

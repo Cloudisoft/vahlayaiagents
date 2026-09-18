@@ -35,17 +35,17 @@ export default function ForgotPassword() {
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="w-full border border-slate-300 rounded-md px-3 py-2 mb-6 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="w-full border border-slate-300 rounded-md px-3 py-2 mb-6 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
         />
         <button
           type="submit"
           disabled={busy}
-          className="w-full bg-indigo-600 text-white text-sm font-medium rounded-md py-2 hover:bg-indigo-700 disabled:opacity-50"
+          className="w-full bg-red-600 text-white text-sm font-medium rounded-md py-2 hover:bg-red-700 disabled:opacity-50"
         >
           {busy ? "Sending..." : "Send reset link"}
         </button>
         <p className="text-sm text-slate-500 mt-4 text-center">
-          <Link to="/login" className="text-indigo-600 hover:underline">
+          <Link to="/login" className="text-red-600 hover:underline">
             Back to sign in
           </Link>
         </p>

@@ -5,12 +5,14 @@ import { stringify } from "csv-stringify/sync";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { runLeadDiscovery } from "../leadgen/discoveryService.js";
 import { computeQualityScore, normalizeLeadPhone } from "../leadgen/enrichment.js";
 import { enqueueJob, isQueueEnabled } from "../services/queue.js";
 
 export const leadgenRouter = Router();
 leadgenRouter.use(requireAuth);
+leadgenRouter.use(requireModuleAccess("leadgen"));
 
 // --- Lead lists ---
 

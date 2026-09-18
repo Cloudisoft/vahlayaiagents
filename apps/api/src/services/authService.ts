@@ -9,10 +9,13 @@ export interface AuthUser {
   id: string;
   organizationId: string;
   email: string;
+  username: string | null;
   firstName: string | null;
   lastName: string | null;
   roleKey: string;
 }
+
+const ALL_MODULE_KEYS = ["hr", "coverage", "leadgen", "voice_agents", "call_auditor"];
 
 function requireJwtSecret(): string {
   if (!env.jwtSecret) {
@@ -48,10 +51,15 @@ function slugify(name: string): string {
   );
 }
 
+function slugifyUsername(base: string): string {
+  return base.toLowerCase().replace(/[^a-z0-9_.]+/g, "").slice(0, 32) || `user${crypto.randomBytes(3).toString("hex")}`;
+}
+
 export async function signup(params: {
   organizationName: string;
   email: string;
   password: string;
+  username?: string;
   firstName?: string;
   lastName?: string;
 }): Promise<AuthUser> {
@@ -63,6 +71,7 @@ export async function signup(params: {
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
+  const username = params.username?.trim() || slugifyUsername(email.split("@")[0]);
 
   return withTransaction(async (client) => {
     let slug = slugify(organizationName);
@@ -83,21 +92,32 @@ export async function signup(params: {
     const roleId = roleResult.rows[0].id;
 
     const userResult = await client.query<{ id: string }>(
-      `insert into users (organization_id, email, password_hash, first_name, last_name, role_id)
-       values ($1, $2, $3, $4, $5, $6) returning id`,
-      [organizationId, email.toLowerCase(), passwordHash, firstName ?? null, lastName ?? null, roleId]
+      `insert into users (organization_id, email, username, password_hash, first_name, last_name, role_id)
+       values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+      [organizationId, email.toLowerCase(), username, passwordHash, firstName ?? null, lastName ?? null, roleId]
     );
+    const userId = userResult.rows[0].id;
+
+    // The org's first user is its admin — grant every module so nothing is
+    // locked out before they've had a chance to visit the Admin Panel.
+    for (const moduleKey of ALL_MODULE_KEYS) {
+      await client.query(
+        "insert into user_module_access (user_id, module_key, enabled, granted_by) values ($1,$2,true,$1)",
+        [userId, moduleKey]
+      );
+    }
 
     await client.query(
       `insert into audit_logs (organization_id, actor_user_id, action, entity_type, entity_id)
        values ($1, $2, 'user.signup', 'user', $3)`,
-      [organizationId, userResult.rows[0].id, userResult.rows[0].id]
+      [organizationId, userId, userId]
     );
 
     return {
-      id: userResult.rows[0].id,
+      id: userId,
       organizationId,
       email: email.toLowerCase(),
+      username,
       firstName: firstName ?? null,
       lastName: lastName ?? null,
       roleKey: "company_admin",
@@ -105,26 +125,30 @@ export async function signup(params: {
   });
 }
 
-export async function login(email: string, password: string): Promise<AuthUser> {
+// Accepts either a username or an email in `identifier` — the mockup's
+// "Username" field, but existing accounts created before usernames existed
+// (or via API integrations) can still sign in with their email.
+export async function login(identifier: string, password: string): Promise<AuthUser> {
   const result = await pool.query<{
     id: string;
     organization_id: string;
     email: string;
+    username: string | null;
     password_hash: string;
     first_name: string | null;
     last_name: string | null;
     role_key: string;
     is_active: boolean;
   }>(
-    `select u.id, u.organization_id, u.email, u.password_hash, u.first_name, u.last_name,
+    `select u.id, u.organization_id, u.email, u.username, u.password_hash, u.first_name, u.last_name,
             r.key as role_key, u.is_active
      from users u join roles r on r.id = u.role_id
-     where u.email = $1`,
-    [email.toLowerCase()]
+     where u.email = $1 or u.username = $1`,
+    [identifier.toLowerCase()]
   );
 
   if (result.rows.length === 0) {
-    throw new Error("Invalid email or password.");
+    throw new Error("Invalid username/email or password.");
   }
   const row = result.rows[0];
   if (!row.is_active) {
@@ -132,7 +156,7 @@ export async function login(email: string, password: string): Promise<AuthUser> 
   }
   const valid = await bcrypt.compare(password, row.password_hash);
   if (!valid) {
-    throw new Error("Invalid email or password.");
+    throw new Error("Invalid username/email or password.");
   }
 
   await pool.query("update users set last_login_at = now() where id = $1", [row.id]);
@@ -141,6 +165,7 @@ export async function login(email: string, password: string): Promise<AuthUser> 
     id: row.id,
     organizationId: row.organization_id,
     email: row.email,
+    username: row.username,
     firstName: row.first_name,
     lastName: row.last_name,
     roleKey: row.role_key,
@@ -172,11 +197,12 @@ export async function rotateSession(refreshToken: string): Promise<AuthUser | nu
     user_id: string;
     organization_id: string;
     email: string;
+    username: string | null;
     first_name: string | null;
     last_name: string | null;
     role_key: string;
   }>(
-    `select s.id as session_id, u.id as user_id, u.organization_id, u.email, u.first_name, u.last_name, r.key as role_key
+    `select s.id as session_id, u.id as user_id, u.organization_id, u.email, u.username, u.first_name, u.last_name, r.key as role_key
      from sessions s
      join users u on u.id = s.user_id
      join roles r on r.id = u.role_id
@@ -189,6 +215,7 @@ export async function rotateSession(refreshToken: string): Promise<AuthUser | nu
     id: row.user_id,
     organizationId: row.organization_id,
     email: row.email,
+    username: row.username,
     firstName: row.first_name,
     lastName: row.last_name,
     roleKey: row.role_key,

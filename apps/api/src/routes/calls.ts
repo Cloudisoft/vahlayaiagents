@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { getStorageDriver } from "../services/storageService.js";
 import { getTelephonyProvider } from "../telephony/index.js";
 
 export const callsRouter = Router();
 callsRouter.use(requireAuth);
+callsRouter.use(requireModuleAccess("voice_agents"));
 
 callsRouter.get("/", async (req: AuthedRequest, res) => {
   const { campaignId, agentId, status, dispositionKey, dateFrom, dateTo } = req.query as Record<string, string | undefined>;

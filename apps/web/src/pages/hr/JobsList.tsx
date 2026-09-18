@@ -35,7 +35,7 @@ export default function JobsList() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-slate-900">VahlayHR — Jobs</h1>
-        <Link to="/hr/jobs/new" className="bg-indigo-600 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-indigo-700">
+        <Link to="/hr/jobs/new" className="bg-red-600 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-red-700">
           + New Job
         </Link>
       </div>
@@ -62,7 +62,7 @@ export default function JobsList() {
               {jobs.map((j) => (
                 <tr key={j.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-3">
-                    <Link to={`/hr/jobs/${j.id}`} className="font-medium text-slate-900 hover:text-indigo-600">
+                    <Link to={`/hr/jobs/${j.id}`} className="font-medium text-slate-900 hover:text-red-600">
                       {j.title}
                     </Link>
                   </td>

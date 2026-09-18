@@ -85,7 +85,7 @@ export default function AuditorHome() {
         <p className="text-sm text-slate-500 mb-3">MP3, WAV, or M4A — up to 200MB / ~1 hour. Processed asynchronously.</p>
         <div className="flex gap-2">
           <input ref={fileRef} type="file" accept=".mp3,.wav,.m4a" className="text-sm" />
-          <button onClick={upload} className="bg-indigo-600 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-indigo-700">
+          <button onClick={upload} className="bg-red-600 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-red-700">
             Upload &amp; Audit
           </button>
         </div>

@@ -4,18 +4,21 @@ import { api, setAccessToken } from "../lib/api.js";
 export interface CurrentUser {
   id: string;
   email: string;
+  username: string | null;
   first_name: string | null;
   last_name: string | null;
   organization_id: string;
   role: string;
   organization_name: string;
+  organization_settings: { enabledModules?: string[] } | null;
+  enabled_modules: string[];
 }
 
 interface AuthContextValue {
   user: CurrentUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  signup: (params: { organizationName: string; email: string; password: string }) => Promise<void>;
+  login: (identifier: string, password: string) => Promise<void>;
+  signup: (params: { organizationName: string; email: string; username?: string; password: string }) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -52,10 +55,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refresh();
   }, [refresh]);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (identifier: string, password: string) => {
     const { accessToken, user } = await api<{ accessToken: string; user: any }>("/auth/login", {
       method: "POST",
-      body: { email, password },
+      body: { identifier, password },
     });
     setAccessToken(accessToken);
     setUser(user);
@@ -63,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadMe]);
 
   const signup = useCallback(
-    async (params: { organizationName: string; email: string; password: string }) => {
+    async (params: { organizationName: string; email: string; username?: string; password: string }) => {
       const { accessToken, user } = await api<{ accessToken: string; user: any }>("/auth/signup", {
         method: "POST",
         body: params,

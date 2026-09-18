@@ -19,6 +19,19 @@ HR → Coverage → LeadGen → Voice AI config → live calling → Call Audito
 analytics/hardening). See `apps/api/migrations/0001_init.sql` for the full
 schema and each module's routes under `apps/api/src/routes`.
 
+The UI is branded as **VahlaySmartAI** — a "Command Center" dashboard
+(`apps/web/src/pages/Dashboard.tsx`) with per-user, per-module access control
+layered on top of the existing role-based RBAC: sign-in accepts a username
+or email (`apps/api/migrations/0002_username_and_module_access.sql`), and an
+Admin Panel (`/admin`) lets a company/global admin create users, set their
+role, grant or revoke access to each of the five product modules
+individually, reset passwords, and deactivate/delete accounts. The org-level
+"Enabled" toggle on each dashboard card (admin-only) controls whether a
+module is active for the whole organization; per-user module grants control
+who within an enabled org can open it. The current brand mark is a text
+placeholder (`apps/web/src/components/BrandMark.tsx`) pending the real
+Vahlay Consulting logo file.
+
 ## Stack
 
 - **Frontend**: React + TypeScript + Tailwind (Vite) — `apps/web`

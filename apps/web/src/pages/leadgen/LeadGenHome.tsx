@@ -106,7 +106,7 @@ export default function LeadGenHome() {
           <input placeholder="State (e.g. Texas)" value={state} onChange={(e) => setState(e.target.value)} className="border border-slate-300 rounded-md px-3 py-2 text-sm" />
           <input placeholder="City" value={city} onChange={(e) => setCity(e.target.value)} className="border border-slate-300 rounded-md px-3 py-2 text-sm" />
         </div>
-        <button onClick={runSearch} disabled={busy || !keywords} className="bg-indigo-600 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-indigo-700 disabled:opacity-50">
+        <button onClick={runSearch} disabled={busy || !keywords} className="bg-red-600 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-red-700 disabled:opacity-50">
           {busy ? "Searching..." : "Search"}
         </button>
       </div>
@@ -150,7 +150,7 @@ export default function LeadGenHome() {
                 <td className="px-4 py-2 text-slate-500">{[l.city, l.state].filter(Boolean).join(", ") || "—"}</td>
                 <td className="px-4 py-2 text-slate-500">
                   {l.website ? (
-                    <a href={l.website} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">
+                    <a href={l.website} target="_blank" rel="noreferrer" className="text-red-600 hover:underline">
                       {l.website.replace(/^https?:\/\//, "")}
                     </a>
                   ) : (

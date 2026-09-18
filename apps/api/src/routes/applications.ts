@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { requireRole } from "../middleware/rbac.js";
 import { pool } from "../db/pool.js";
 import { sendRejectionEmail } from "../services/rejectionService.js";
@@ -7,6 +8,7 @@ import { createInterviewSession } from "../services/interviewEngine.js";
 
 export const applicationsRouter = Router();
 applicationsRouter.use(requireAuth);
+applicationsRouter.use(requireModuleAccess("hr"));
 applicationsRouter.use(requireRole("hr", "recruiter"));
 
 applicationsRouter.get("/", async (req: AuthedRequest, res) => {
