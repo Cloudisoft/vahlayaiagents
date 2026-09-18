@@ -5,10 +5,16 @@ import { env } from "../config/env.js";
 
 const MAX_ATTEMPTS = 3;
 
-// VahlayHR -> Interview Engine -> Telephony Abstraction -> Plivo/Twilio/... -> Candidate
+// HR AI interviews are India calling and always go through Plivo — this is
+// intentionally hard-coded, not read from org settings, so it can't drift
+// per-org. Vahlay Voice AI (US campaigns) is the Twilio side of the split;
+// see telephony/index.ts for that convention.
+const HR_INTERVIEW_TELEPHONY_PROVIDER = "plivo";
+
+// VahlayHR -> Interview Engine -> Telephony Abstraction -> Plivo -> Candidate
 // This module owns interview logic (question order, behavior, scoring). It
 // never talks to a telephony SDK directly — only the TelephonyProvider
-// interface — so swapping providers never touches this file.
+// interface.
 export async function createInterviewSession(applicationId: string): Promise<string> {
   const appResult = await pool.query(
     `select a.id, a.organization_id, a.job_id, a.candidate_id, c.phone, o.settings
@@ -35,7 +41,7 @@ export async function createInterviewSession(applicationId: string): Promise<str
     throw new Error(`Maximum interview call attempts (${MAX_ATTEMPTS}) reached for this application.`);
   }
 
-  const providerKey = app.settings?.telephonyProvider ?? "plivo";
+  const providerKey = HR_INTERVIEW_TELEPHONY_PROVIDER;
 
   const sessionResult = await pool.query(
     `insert into interview_sessions (organization_id, application_id, telephony_provider, phone_number,
