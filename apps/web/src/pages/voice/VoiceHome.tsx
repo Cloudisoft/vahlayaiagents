@@ -77,11 +77,11 @@ export default function VoiceHome() {
     }
   }
 
-  async function syncNumbers() {
+  async function syncNumbers(provider: "plivo" | "twilio") {
     setError(null);
     setMessage(null);
     try {
-      const r = await api<{ message: string }>("/voice/phone-numbers/sync", { method: "POST", body: { provider: "plivo" } });
+      const r = await api<{ message: string }>("/voice/phone-numbers/sync", { method: "POST", body: { provider } });
       setMessage(r.message);
       await loadAll();
     } catch (err) {
@@ -223,9 +223,15 @@ export default function VoiceHome() {
 
       {tab === "numbers" && (
         <div>
-          <div className="flex justify-end mb-3">
-            <button onClick={syncNumbers} className="bg-slate-900 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-slate-800">
-              Sync from Plivo
+          <p className="text-sm text-slate-500 mb-3">
+            Twilio numbers carry US Voice AI campaigns; Plivo numbers carry India HR interviews.
+          </p>
+          <div className="flex justify-end gap-2 mb-3">
+            <button onClick={() => syncNumbers("twilio")} className="bg-slate-900 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-slate-800">
+              Sync from Twilio (US)
+            </button>
+            <button onClick={() => syncNumbers("plivo")} className="bg-slate-900 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-slate-800">
+              Sync from Plivo (India)
             </button>
           </div>
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -243,7 +249,7 @@ export default function VoiceHome() {
                 {numbers.map((n) => (
                   <tr key={n.id} className="border-t border-slate-100">
                     <td className="px-4 py-2 font-medium text-slate-900">{n.phone_e164}</td>
-                    <td className="px-4 py-2 text-slate-500">{n.provider}</td>
+                    <td className="px-4 py-2 text-slate-500 capitalize">{n.provider}</td>
                     <td className="px-4 py-2 text-slate-500">{n.status}</td>
                     <td className="px-4 py-2 text-slate-500">{n.agent_name ?? "—"}</td>
                     <td className="px-4 py-2 text-slate-500">{n.campaign_name ?? "—"}</td>
