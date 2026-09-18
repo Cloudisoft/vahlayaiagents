@@ -1,0 +1,23 @@
+version: "3.8"
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vahlay
+      POSTGRES_PASSWORD: vahlay
+      POSTGRES_DB: vahlay
+    ports:
+      - "5432:5432"
+    volumes:
+      - vahlay_pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - vahlay_redis_data:/data
+
+volumes:
+  vahlay_pg_data:
+  vahlay_redis_data:

@@ -1,0 +1,15 @@
+{
+  "name": "vahlay-ai",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build:api": "npm run build --workspace=apps/api",
+    "build:web": "npm run build --workspace=apps/web",
+    "migrate": "npm run migrate --workspace=apps/api",
+    "worker": "npm run worker --workspace=apps/api"
+  }
+}
