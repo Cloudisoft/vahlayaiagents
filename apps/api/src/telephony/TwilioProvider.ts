@@ -133,6 +133,34 @@ export class TwilioProvider implements TelephonyProvider {
     }));
   }
 
+  async searchAvailableNumbers(params: { areaCode?: string; state?: string; contains?: string; limit?: number }) {
+    const q = new URLSearchParams({ VoiceEnabled: "true", PageSize: String(params.limit ?? 20) });
+    if (params.areaCode) q.set("AreaCode", params.areaCode);
+    if (params.state) q.set("InRegion", params.state.toUpperCase());
+    if (params.contains) q.set("Contains", params.contains);
+    const result = await this.request<{ available_phone_numbers: Array<{ phone_number: string; friendly_name: string; locality: string; region: string }> }>(
+      "GET",
+      `/AvailablePhoneNumbers/US/Local.json?${q.toString()}`
+    );
+    return (result.available_phone_numbers ?? []).map((n) => ({
+      number: n.phone_number,
+      friendlyName: n.friendly_name,
+      locality: n.locality,
+      region: n.region,
+    }));
+  }
+
+  async buyNumber(phoneNumber: string): Promise<{ sid: string; number: string }> {
+    const result = await this.request<{ sid: string; phone_number: string }>("POST", "/IncomingPhoneNumbers.json", {
+      PhoneNumber: phoneNumber,
+    });
+    return { sid: result.sid, number: result.phone_number };
+  }
+
+  get credentials() {
+    return { accountSid: this.accountSid, authToken: this.authToken };
+  }
+
   async validateNumber(e164: string): Promise<boolean> {
     return Boolean(normalizeUsE164(e164));
   }

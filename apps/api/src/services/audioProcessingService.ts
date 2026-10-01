@@ -92,3 +92,31 @@ export async function transcribeLongAudio(params: {
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+// Call recordings are stored as MP3 192 kbps / 44.1 kHz, loudness-normalised
+// to −16 LUFS so quiet calls are clearly audible (playbook §7).
+export async function normalizeCallRecording(buffer: Buffer, inputExt = "wav"): Promise<Buffer> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "vahlay-rec-"));
+  const inputPath = path.join(dir, `input.${inputExt}`);
+  const outputPath = path.join(dir, "output.mp3");
+  try {
+    await writeFile(inputPath, buffer);
+    await run(ffmpegPath, [
+      "-y",
+      "-i",
+      inputPath,
+      "-af",
+      "loudnorm=I=-16:TP=-1.5:LRA=11",
+      "-ar",
+      "44100",
+      "-c:a",
+      "libmp3lame",
+      "-b:a",
+      "192k",
+      outputPath,
+    ]);
+    return await readFile(outputPath);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}

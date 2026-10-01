@@ -12,8 +12,7 @@ import { jobsRouter } from "./routes/jobs.js";
 import { publicJobsRouter } from "./routes/publicJobs.js";
 import { applicationsRouter } from "./routes/applications.js";
 import { plivoWebhookRouter } from "./routes/webhooks/plivo.js";
-import { plivoVoiceAgentWebhookRouter } from "./routes/webhooks/plivoVoiceAgent.js";
-import { twilioVoiceAgentWebhookRouter } from "./routes/webhooks/twilioVoiceAgent.js";
+import { vapiWebhookRouter } from "./routes/webhooks/vapi.js";
 import { coverageRouter } from "./routes/coverage.js";
 import { leadgenRouter } from "./routes/leadgen.js";
 import { agentsRouter } from "./routes/agents.js";
@@ -37,13 +36,11 @@ app.use(cookieParser());
 
 app.get("/api/health", (_req, res) => res.json({ status: "ok", timestamp: new Date().toISOString() }));
 
-// Plivo and Twilio both post form-encoded webhook bodies — parse before the
-// JSON body parser (which would otherwise leave req.body empty for these
-// routes). Plivo carries India HR interviews; Twilio carries US Voice AI
-// campaign calls (see telephony/index.ts).
-app.use("/api/webhooks/plivo/voice-agent", express.urlencoded({ extended: false }), plivoVoiceAgentWebhookRouter);
+// Plivo posts form-encoded webhook bodies (India HR interviews) — parse
+// before the JSON body parser. VAPI (US Voice AI campaigns) posts JSON, and
+// end-of-call reports can be large.
 app.use("/api/webhooks/plivo", express.urlencoded({ extended: false }), plivoWebhookRouter);
-app.use("/api/webhooks/twilio/voice-agent", express.urlencoded({ extended: false }), twilioVoiceAgentWebhookRouter);
+app.use("/api/webhooks/vapi", express.json({ limit: "10mb" }), vapiWebhookRouter);
 
 app.use(express.json({ limit: "2mb" }));
 
@@ -66,9 +63,6 @@ app.use("/api/auditor", auditorRouter);
 app.use("/api/dashboard", dashboardRouter);
 app.use("/api/usage", usageRouter);
 app.use("/api/notifications", notificationsRouter);
-
-// Additional provider webhooks land as their modules do (spec §47):
-// /api/webhooks/vapi.
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
