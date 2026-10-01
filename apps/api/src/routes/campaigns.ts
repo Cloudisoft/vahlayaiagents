@@ -5,7 +5,9 @@ import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { requireRole } from "../middleware/rbac.js";
 import { requirePermission } from "../middleware/permissions.js";
+import multer from "multer";
 import { normalizeLeadPhone } from "../leadgen/enrichment.js";
+import { importLeads, readRows } from "../leadgen/leadImport.js";
 import { normalizePlaceholders } from "../voiceai/placeholders.js";
 import { parseWindow, zonedLocalToUtc } from "../voiceai/callingWindow.js";
 import { publishCampaign, agentChangedSincePublish, PublishError } from "../voiceai/campaignVersions.js";
@@ -362,6 +364,23 @@ campaignsRouter.post("/:id/leads/remove", async (req: AuthedRequest, res) => {
     [campaign.id, parsed.data.campaignLeadIds]
   );
   res.json({ removed: result.rowCount ?? 0 });
+});
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+campaignsRouter.post("/:id/leads/import", upload.single("file"), async (req: AuthedRequest, res) => {
+  if (!req.file) return res.status(400).json({ error: "No CSV or XLSX file provided." });
+  const campaign = await loadCampaign(req.params.id, req.auth!.organizationId);
+  if (!campaign) return res.status(404).json({ error: "Campaign not found." });
+  let records: Record<string, unknown>[];
+  try {
+    records = await readRows(req.file.buffer, req.file.originalname);
+  } catch (err) {
+    return res.status(400).json({ error: `Could not read file: ${(err as Error).message}` });
+  }
+  const result = await importLeads(req.auth!.organizationId, records, { leadListId: null, campaignId: campaign.id });
+  if (campaign.status === "active") await signalSlotFreed(campaign.id);
+  res.json(result);
 });
 
 const singleLeadSchema = z.object({

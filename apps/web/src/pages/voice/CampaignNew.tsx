@@ -1,21 +1,27 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../../lib/api.js";
+import { btnPrimary, inputCls } from "../../lib/voice.js";
+
+interface Template {
+  key: string;
+  name: string;
+  suggestedCampaign: { introName: string; callbackNumber: string };
+}
 
 export default function CampaignNew() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [agentId, setAgentId] = useState("");
-  const [leadListId, setLeadListId] = useState("");
-  const [concurrency, setConcurrency] = useState(1);
+  const [introName, setIntroName] = useState("");
   const [agents, setAgents] = useState<Array<{ id: string; name: string }>>([]);
-  const [lists, setLists] = useState<Array<{ id: string; name: string }>>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api<{ agents: Array<{ id: string; name: string }> }>("/voice/agents").then((r) => setAgents(r.agents));
-    api<{ lists: Array<{ id: string; name: string }> }>("/leadgen/lists").then((r) => setLists(r.lists));
+    api<{ templates: Template[] }>("/voice/agents/templates").then((r) => setTemplates(r.templates));
   }, []);
 
   async function onSubmit(e: FormEvent) {
@@ -23,9 +29,19 @@ export default function CampaignNew() {
     setError(null);
     setBusy(true);
     try {
+      let aiAgentId = agentId || undefined;
+      let callbackNumber: string | undefined;
+      let intro = introName || undefined;
+      if (agentId.startsWith("template:")) {
+        const key = agentId.slice("template:".length);
+        const r = await api<{ agent: { id: string }; suggestedCampaign: Template["suggestedCampaign"] }>(`/voice/agents/templates/${key}`, { method: "POST" });
+        aiAgentId = r.agent.id;
+        callbackNumber = r.suggestedCampaign.callbackNumber;
+        intro = intro ?? r.suggestedCampaign.introName;
+      }
       const { campaign } = await api<{ campaign: { id: string } }>("/voice/campaigns", {
         method: "POST",
-        body: { name, aiAgentId: agentId || undefined, leadListId: leadListId || undefined, concurrency },
+        body: { name, aiAgentId, introName: intro, callbackNumber },
       });
       navigate(`/voice/campaigns/${campaign.id}`);
     } catch (err) {
@@ -36,41 +52,28 @@ export default function CampaignNew() {
   }
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-xl">
       <h1 className="text-2xl font-semibold text-slate-900 mb-6">New Campaign</h1>
       {error && <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
       <form onSubmit={onSubmit} className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Campaign name</label>
-          <input required value={name} onChange={(e) => setName(e.target.value)} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">AI Agent</label>
-            <select value={agentId} onChange={(e) => setAgentId(e.target.value)} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm">
-              <option value="">Select later</option>
-              {agents.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Lead list</label>
-            <select value={leadListId} onChange={(e) => setLeadListId(e.target.value)} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm">
-              <option value="">None yet</option>
-              {lists.map((l) => (
-                <option key={l.id} value={l.id}>{l.name}</option>
-              ))}
-            </select>
-          </div>
+          <input required value={name} onChange={(e) => setName(e.target.value)} className={inputCls} placeholder="Spectrum Business – Dallas" />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Concurrency</label>
-          <input type="number" min={1} max={50} value={concurrency} onChange={(e) => setConcurrency(Number(e.target.value))} className="w-32 border border-slate-300 rounded-md px-3 py-2 text-sm" />
+          <label className="block text-sm font-medium text-slate-700 mb-1">AI agent</label>
+          <select required value={agentId} onChange={(e) => setAgentId(e.target.value)} className={inputCls}>
+            <option value="">Choose an agent…</option>
+            {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            {templates.map((t) => <option key={t.key} value={`template:${t.key}`}>New from template: {t.name}</option>)}
+          </select>
         </div>
-        <button type="submit" disabled={busy} className="bg-red-600 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-red-700 disabled:opacity-50">
-          {busy ? "Creating..." : "Create campaign"}
-        </button>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Intro name</label>
+          <input value={introName} onChange={(e) => setIntroName(e.target.value)} className={inputCls} placeholder="Who the agent says it's calling for" />
+          <p className="text-xs text-slate-500 mt-1">Spoken as "this is Ray with <em>intro name</em>". You can change everything else on the next screen.</p>
+        </div>
+        <button type="submit" disabled={busy} className={btnPrimary}>{busy ? "Creating…" : "Create and configure"}</button>
       </form>
     </div>
   );

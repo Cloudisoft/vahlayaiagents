@@ -12,6 +12,7 @@ export interface CurrentUser {
   organization_name: string;
   organization_settings: { enabledModules?: string[] } | null;
   enabled_modules: string[];
+  permissions: string[];
 }
 
 interface AuthContextValue {

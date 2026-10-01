@@ -1,139 +1,792 @@
-import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import { api, ApiError } from "../../lib/api.js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams, useNavigate } from "react-router-dom";
+import { api, ApiError, getAccessToken } from "../../lib/api.js";
+import {
+  DispositionBadge,
+  StatusPill,
+  btnDark,
+  btnGhost,
+  btnPrimary,
+  formatPhone,
+  formatSeconds,
+  inputCls,
+  useCan,
+  useOrgEvents,
+} from "../../lib/voice.js";
+
+interface CallingWindow {
+  days: number[];
+  start: string;
+  end: string;
+  useLeadTimeZone: boolean;
+  lunchBreak: { start: string; end: string } | null;
+}
 
 interface Campaign {
   id: string;
   name: string;
+  description: string | null;
   status: string;
+  ai_agent_id: string | null;
+  voice_id: string | null;
+  transfer_number: string | null;
   concurrency: number;
   max_attempts: number;
-  ai_agent_id: string | null;
+  calling_hours: CallingWindow;
+  time_zone: string;
+  max_call_duration_seconds: number;
+  intro_name: string | null;
+  callback_number: string | null;
+  script: string | null;
+  knowledge_text: string | null;
+  voicemail_enabled: boolean;
+  voicemail_script: string | null;
+  retry_on_voicemail: boolean;
+  retry_delay_minutes: number;
+  lead_cooldown_hours: number;
+  dial_timeout_seconds: number;
+  llm_model: string | null;
+  published_version_id: string | null;
+  published_at: string | null;
+  has_unpublished_changes: boolean;
+  paused_reason: string | null;
+  scheduled_start_at: string | null;
+  published_version: number | null;
+  total_leads: number;
+  leads_remaining: number;
+  leads_dialing: number;
+  total_calls: number;
+  live_calls: number;
+  connected_calls: number;
+  interested_leads: number;
+  appointments: number;
+  transfers: number;
+  voicemails: number;
+  avg_talk_seconds: number | null;
+}
+
+interface PoolNumber {
+  id: string;
+  phone_e164: string;
+  area_code: string | null;
+  vapi_phone_number_id: string | null;
+  last_used_at: string | null;
 }
 
 interface CampaignLead {
   id: string;
   status: string;
-  business_name: string;
-  main_phone_e164: string;
+  attempts: number;
+  last_disposition: string | null;
+  next_attempt_at: string | null;
+  business_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  main_phone_e164: string | null;
+  state: string | null;
+  is_dnc: boolean;
 }
+
+interface Version {
+  id: string;
+  version: number;
+  created_at: string;
+  published_by_name: string | null;
+  calls: number;
+}
+
+type Tab = "settings" | "numbers" | "leads" | "versions";
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const TIME_ZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Phoenix", "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu"];
+const MODELS = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"];
+
+// Editable fields, API name -> campaign column.
+const FIELDS = {
+  name: "name",
+  description: "description",
+  aiAgentId: "ai_agent_id",
+  voiceId: "voice_id",
+  transferNumber: "transfer_number",
+  concurrency: "concurrency",
+  maxAttempts: "max_attempts",
+  callingHours: "calling_hours",
+  timeZone: "time_zone",
+  maxCallDurationSeconds: "max_call_duration_seconds",
+  introName: "intro_name",
+  callbackNumber: "callback_number",
+  script: "script",
+  knowledgeText: "knowledge_text",
+  voicemailEnabled: "voicemail_enabled",
+  voicemailScript: "voicemail_script",
+  retryOnVoicemail: "retry_on_voicemail",
+  retryDelayMinutes: "retry_delay_minutes",
+  leadCooldownHours: "lead_cooldown_hours",
+  dialTimeoutSeconds: "dial_timeout_seconds",
+  llmModel: "llm_model",
+} as const;
+type FieldKey = keyof typeof FIELDS;
 
 export default function CampaignDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const can = useCan();
   const [campaign, setCampaign] = useState<Campaign | null>(null);
-  const [leads, setLeads] = useState<CampaignLead[]>([]);
-  const [lists, setLists] = useState<Array<{ id: string; name: string }>>([]);
-  const [selectedList, setSelectedList] = useState("");
+  const [draft, setDraft] = useState<Partial<Record<FieldKey, any>>>({});
+  const [numbers, setNumbers] = useState<PoolNumber[]>([]);
+  const [agentChanged, setAgentChanged] = useState(false);
+  const [tab, setTab] = useState<Tab>("settings");
+  const [agents, setAgents] = useState<Array<{ id: string; name: string }>>([]);
+  const [voices, setVoices] = useState<Array<{ id: string; name: string }>>([]);
+  const [allNumbers, setAllNumbers] = useState<Array<{ id: string; phone_e164: string; provider: string; vapi_phone_number_id: string | null }>>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
   async function load() {
-    const { campaign, leads } = await api<{ campaign: Campaign; leads: CampaignLead[] }>(`/voice/campaigns/${id}`);
-    setCampaign(campaign);
-    setLeads(leads);
-    const { lists } = await api<{ lists: Array<{ id: string; name: string }> }>("/leadgen/lists");
-    setLists(lists);
+    const r = await api<{ campaign: Campaign; numbers: PoolNumber[]; agentChangedSincePublish: boolean }>(`/voice/campaigns/${id}`);
+    setCampaign(r.campaign);
+    setNumbers(r.numbers);
+    setAgentChanged(r.agentChangedSincePublish);
   }
 
   useEffect(() => {
-    load();
+    load().catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load campaign."));
+    api<{ agents: Array<{ id: string; name: string }> }>("/voice/agents").then((r) => setAgents(r.agents));
+    api<{ voices: Array<{ id: string; name: string }> }>("/voice/voices").then((r) => setVoices(r.voices));
+    api<{ phoneNumbers: typeof allNumbers }>("/voice/phone-numbers").then((r) => setAllNumbers(r.phoneNumbers));
   }, [id]);
 
-  async function setStatus(status: string) {
+  useOrgEvents((e) => {
+    if (e.campaignId === id && (e.type === "campaign_status" || e.type === "call_ended" || e.type === "campaign_published")) load();
+    if (e.type === "call_status") load();
+  });
+
+  const dirty = Object.keys(draft).length > 0;
+
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (dirty) e.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  function value<K extends FieldKey>(key: K): any {
+    if (key in draft) return draft[key];
+    return campaign ? (campaign as any)[FIELDS[key]] : undefined;
+  }
+  function set<K extends FieldKey>(key: K, v: any) {
+    setDraft((d) => {
+      const next = { ...d, [key]: v };
+      if (campaign && JSON.stringify((campaign as any)[FIELDS[key]]) === JSON.stringify(v)) delete next[key];
+      return next;
+    });
+  }
+
+  async function act(key: string, fn: () => Promise<string | void>) {
     setError(null);
     setMessage(null);
+    setBusy(key);
     try {
-      await api(`/voice/campaigns/${id}/status`, { method: "POST", body: { status } });
+      const msg = await fn();
+      if (msg) setMessage(msg);
       await load();
-      if (status === "active") setMessage("Campaign activated. Calls are placed by the queue worker (requires REDIS_URL and telephony credentials).");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Something went wrong.");
+      setError(err instanceof ApiError ? err.message : "Request failed.");
+    } finally {
+      setBusy(null);
     }
   }
 
-  async function addLeadsFromList() {
-    if (!selectedList) return;
-    const r = await api<{ added: number }>(`/voice/campaigns/${id}/leads`, { method: "POST", body: { leadListId: selectedList } });
-    setMessage(`Added ${r.added} leads to the campaign.`);
-    await load();
+  async function saveDraft() {
+    if (!dirty) return;
+    await api(`/voice/campaigns/${id}`, { method: "PATCH", body: draft });
+    setDraft({});
   }
 
-  if (!campaign) return <div className="text-sm text-slate-500">Loading...</div>;
+  async function saveAndPublish() {
+    await act("publish", async () => {
+      await saveDraft();
+      setWarnings([]);
+      let confirmAgentChange = false;
+      if (agentChanged) {
+        confirmAgentChange = confirm("The linked agent changed since the last publish. Publish those agent changes to live calls too?");
+        if (!confirmAgentChange) return;
+      }
+      const r = await api<{ version: number; warnings: string[] }>(`/voice/campaigns/${id}/publish`, {
+        method: "POST",
+        body: { confirmAgentChange },
+      });
+      setWarnings(r.warnings);
+      return `Published version ${r.version}. New calls use it immediately; calls already in progress finish on the old version.`;
+    });
+  }
+
+  async function control(action: string, extra: Record<string, unknown> = {}) {
+    await act(action, async () => {
+      await api(`/voice/campaigns/${id}/control`, { method: "POST", body: { action, ...extra } });
+      return {
+        start: "Campaign started.",
+        resume: "Campaign resumed.",
+        pause: "Campaign paused. Calls in progress will finish.",
+        stop: "Campaign stopped.",
+        restart: "Campaign restarted — leads were requeued.",
+        schedule: "Campaign scheduled.",
+      }[action];
+    });
+  }
+
+  if (!campaign) {
+    return <div className="text-sm text-slate-500">{error ?? "Loading…"}</div>;
+  }
+
+  const window_: CallingWindow = value("callingHours");
+  const status = campaign.status;
+  const canStart = can("campaign.start");
 
   return (
-    <div className="max-w-4xl space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="max-w-6xl pb-24">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">{campaign.name}</h1>
-          <span className="text-xs bg-slate-100 text-slate-600 rounded-full px-2 py-0.5">{campaign.status}</span>
+          <Link to="/voice" className="text-xs text-slate-500 hover:text-slate-700">← Voice AI</Link>
+          <div className="flex items-center gap-3 mt-1">
+            <h1 className="text-2xl font-semibold text-slate-900">{campaign.name}</h1>
+            <StatusPill status={status} />
+          </div>
+          <div className="text-xs text-slate-500 mt-1">
+            {campaign.published_version ? `Live version v${campaign.published_version} · published ${new Date(campaign.published_at!).toLocaleString()}` : "Not published yet"}
+            {status === "scheduled" && campaign.scheduled_start_at && ` · starts ${new Date(campaign.scheduled_start_at).toLocaleString()}`}
+          </div>
         </div>
-        <div className="flex gap-2">
-          {campaign.status !== "active" && (
-            <button onClick={() => setStatus("active")} className="text-sm bg-green-600 text-white rounded-md px-3 py-1.5 hover:bg-green-700">
-              Start
-            </button>
-          )}
-          {campaign.status === "active" && (
-            <button onClick={() => setStatus("paused")} className="text-sm bg-amber-600 text-white rounded-md px-3 py-1.5 hover:bg-amber-700">
-              Pause
-            </button>
-          )}
-          <button onClick={() => setStatus("completed")} className="text-sm bg-slate-600 text-white rounded-md px-3 py-1.5 hover:bg-slate-700">
-            Mark completed
-          </button>
-        </div>
+        {canStart && (
+          <div className="flex flex-wrap gap-2">
+            {(status === "draft" || status === "completed" || status === "stopped") && (
+              <button disabled={busy !== null} onClick={() => control("start")} className={btnPrimary}>Start</button>
+            )}
+            {status === "paused" && <button disabled={busy !== null} onClick={() => control("resume")} className={btnPrimary}>Resume</button>}
+            {status === "active" && <button disabled={busy !== null} onClick={() => control("pause")} className={btnDark}>Pause</button>}
+            {(status === "active" || status === "paused" || status === "scheduled") && (
+              <button
+                disabled={busy !== null}
+                onClick={() => {
+                  const endLiveCalls = campaign.live_calls > 0 && confirm(`End the ${campaign.live_calls} call(s) in progress too? Cancel lets them finish.`);
+                  control("stop", { endLiveCalls });
+                }}
+                className={btnGhost}
+              >
+                Stop
+              </button>
+            )}
+            {(status === "completed" || status === "stopped") && (
+              <button disabled={busy !== null} onClick={() => confirm("Requeue every lead (except DNC) and start over?") && control("restart")} className={btnGhost}>
+                Restart
+              </button>
+            )}
+            {status !== "active" && <ScheduleButton timeZone={campaign.time_zone} disabled={busy !== null} onSchedule={(at) => control("schedule", { scheduledStartAt: at })} />}
+            {(status === "draft" || status === "stopped" || status === "completed") && (
+              <button
+                disabled={busy !== null}
+                onClick={() =>
+                  confirm("Delete this campaign? Call records are kept.") &&
+                  act("delete", async () => {
+                    await api(`/voice/campaigns/${id}`, { method: "DELETE" });
+                    navigate("/voice");
+                  })
+                }
+                className="text-sm text-slate-500 hover:text-red-600 px-2"
+              >
+                Delete
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
-      {message && <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-2">{message}</div>}
+      {campaign.paused_reason && <div className="mb-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-2">Paused automatically: {campaign.paused_reason}</div>}
+      {error && <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
+      {message && <div className="mb-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-2">{message}</div>}
+      {warnings.map((w) => <div key={w} className="mb-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-2">{w}</div>)}
 
-      {!campaign.ai_agent_id && (
-        <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
-          No AI agent assigned yet — the campaign can't place calls until one is configured.
+      <div className="grid grid-cols-3 md:grid-cols-6 lg:grid-cols-9 gap-2 mb-6">
+        {[
+          ["Leads", campaign.total_leads],
+          ["Remaining", campaign.leads_remaining],
+          ["Live", campaign.live_calls],
+          ["Calls", campaign.total_calls],
+          ["Connected", campaign.connected_calls],
+          ["Voicemail", campaign.voicemails],
+          ["Interested", campaign.interested_leads],
+          ["Transfers", campaign.transfers],
+          ["Avg talk", formatSeconds(campaign.avg_talk_seconds)],
+        ].map(([label, v]) => (
+          <div key={label as string} className="bg-white border border-slate-200 rounded-lg p-2">
+            <div className="text-xs text-slate-500">{label}</div>
+            <div className="text-lg font-semibold text-slate-900">{v}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex gap-1 border-b border-slate-200 mb-4">
+        {(["settings", "numbers", "leads", "versions"] as Tab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium capitalize border-b-2 ${tab === t ? "border-red-600 text-red-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+          >
+            {t === "numbers" ? `Number pool (${numbers.length})` : t}
+          </button>
+        ))}
+      </div>
+
+      {tab === "settings" && (
+        <div className="space-y-4">
+          <Section title="Agent & identity">
+            <div className="grid md:grid-cols-2 gap-4">
+              <Field label="Campaign name"><input value={value("name") ?? ""} onChange={(e) => set("name", e.target.value)} className={inputCls} /></Field>
+              <Field label="AI agent">
+                <select value={value("aiAgentId") ?? ""} onChange={(e) => set("aiAgentId", e.target.value || null)} className={inputCls}>
+                  <option value="">Choose an agent…</option>
+                  {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+                {value("aiAgentId") && <Link to={`/voice/agents/${value("aiAgentId")}`} className="text-xs text-red-600 hover:underline">Edit agent →</Link>}
+              </Field>
+              <Field label="Intro name" hint={'Spoken as "this is Ray with …". Use exactly how you\'re allowed to identify yourselves (e.g. "an authorized Spectrum Business reseller").'}>
+                <input value={value("introName") ?? ""} onChange={(e) => set("introName", e.target.value)} className={inputCls} />
+              </Field>
+              <Field label="Voice override" hint="Leave empty to use the agent's voice.">
+                <select value={value("voiceId") ?? ""} onChange={(e) => set("voiceId", e.target.value || null)} className={inputCls}>
+                  <option value="">Agent's voice</option>
+                  {voices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Callback number" hint="Read out when a lead asks how to reach you.">
+                <input value={value("callbackNumber") ?? ""} onChange={(e) => set("callbackNumber", e.target.value)} className={inputCls} placeholder="+13023423925" />
+              </Field>
+              <Field label="Transfer number" hint="Interested leads are warm-transferred here.">
+                <input value={value("transferNumber") ?? ""} onChange={(e) => set("transferNumber", e.target.value)} className={inputCls} placeholder="+13025550100" />
+              </Field>
+              <Field label="Model">
+                <select value={value("llmModel") ?? "gpt-4o-mini"} onChange={(e) => set("llmModel", e.target.value)} className={inputCls}>
+                  {MODELS.map((m) => <option key={m}>{m}</option>)}
+                </select>
+              </Field>
+              <Field label="Max call length (minutes)">
+                <input type="number" min={1} max={60} value={Math.round((value("maxCallDurationSeconds") ?? 600) / 60)} onChange={(e) => set("maxCallDurationSeconds", Number(e.target.value) * 60)} className={inputCls} />
+              </Field>
+            </div>
+          </Section>
+
+          <Section title="Script & knowledge">
+            <Field label="Campaign script" hint="Talking points for this campaign, added on top of the agent's instructions. Placeholders like [first name] or {Company} are normalised on save.">
+              <textarea rows={8} value={value("script") ?? ""} onChange={(e) => set("script", e.target.value)} className={`${inputCls} font-mono text-xs`} />
+            </Field>
+            <Field label="Knowledge base" hint="Facts the agent can look up mid-call (offers, coverage, pricing rules). Split topics with blank lines.">
+              <textarea rows={6} value={value("knowledgeText") ?? ""} onChange={(e) => set("knowledgeText", e.target.value)} className={`${inputCls} font-mono text-xs`} />
+            </Field>
+          </Section>
+
+          <Section title="Calling window & pacing">
+            <div className="flex flex-wrap gap-2 mb-3">
+              {DAYS.map((d, i) => {
+                const on = window_.days.includes(i);
+                return (
+                  <button
+                    type="button"
+                    key={d}
+                    onClick={() => set("callingHours", { ...window_, days: on ? window_.days.filter((x) => x !== i) : [...window_.days, i].sort() })}
+                    className={`text-xs px-3 py-1.5 rounded-md border ${on ? "bg-red-600 text-white border-red-600" : "bg-white text-slate-600 border-slate-300"}`}
+                  >
+                    {d}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="grid md:grid-cols-4 gap-4">
+              <Field label="From"><input type="time" value={window_.start} onChange={(e) => set("callingHours", { ...window_, start: e.target.value })} className={inputCls} /></Field>
+              <Field label="Until"><input type="time" value={window_.end} onChange={(e) => set("callingHours", { ...window_, end: e.target.value })} className={inputCls} /></Field>
+              <Field label="Campaign time zone">
+                <select value={value("timeZone")} onChange={(e) => set("timeZone", e.target.value)} className={inputCls}>
+                  {TIME_ZONES.map((t) => <option key={t}>{t}</option>)}
+                </select>
+              </Field>
+              <Field label="Lunch break">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(window_.lunchBreak)}
+                    onChange={(e) => set("callingHours", { ...window_, lunchBreak: e.target.checked ? { start: "12:00", end: "13:00" } : null })}
+                  />
+                  {window_.lunchBreak && (
+                    <>
+                      <input type="time" value={window_.lunchBreak.start} onChange={(e) => set("callingHours", { ...window_, lunchBreak: { ...window_.lunchBreak!, start: e.target.value } })} className={`${inputCls} py-1`} />
+                      <input type="time" value={window_.lunchBreak.end} onChange={(e) => set("callingHours", { ...window_, lunchBreak: { ...window_.lunchBreak!, end: e.target.value } })} className={`${inputCls} py-1`} />
+                    </>
+                  )}
+                </div>
+              </Field>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-slate-700 mt-3">
+              <input type="checkbox" checked={window_.useLeadTimeZone} onChange={(e) => set("callingHours", { ...window_, useLeadTimeZone: e.target.checked })} />
+              Use each lead's local time (from their time zone or state) instead of the campaign time zone
+            </label>
+            <div className="grid md:grid-cols-5 gap-4 mt-4">
+              <Field label="Concurrent calls"><input type="number" min={1} max={50} value={value("concurrency")} onChange={(e) => set("concurrency", Number(e.target.value))} className={inputCls} /></Field>
+              <Field label="Max attempts / lead"><input type="number" min={1} max={10} value={value("maxAttempts")} onChange={(e) => set("maxAttempts", Number(e.target.value))} className={inputCls} /></Field>
+              <Field label="Retry delay (min)"><input type="number" min={5} value={value("retryDelayMinutes")} onChange={(e) => set("retryDelayMinutes", Number(e.target.value))} className={inputCls} /></Field>
+              <Field label="Lead cooldown (h)" hint="Min gap between calls to the same lead."><input type="number" min={0} value={value("leadCooldownHours")} onChange={(e) => set("leadCooldownHours", Number(e.target.value))} className={inputCls} /></Field>
+              <Field label="Ring timeout (s)"><input type="number" min={20} max={180} value={value("dialTimeoutSeconds")} onChange={(e) => set("dialTimeoutSeconds", Number(e.target.value))} className={inputCls} /></Field>
+            </div>
+          </Section>
+
+          <Section title="Voicemail">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={Boolean(value("voicemailEnabled"))} onChange={(e) => set("voicemailEnabled", e.target.checked)} />
+              Leave a voicemail when a machine answers
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" checked={Boolean(value("retryOnVoicemail"))} onChange={(e) => set("retryOnVoicemail", e.target.checked)} />
+              Retry leads that went to voicemail (counts toward max attempts)
+            </label>
+            {value("voicemailEnabled") && (
+              <Field label="Voicemail message" hint="Short and specific: who's calling, why, and the callback number.">
+                <textarea rows={3} value={value("voicemailScript") ?? ""} onChange={(e) => set("voicemailScript", e.target.value)} className={inputCls} placeholder="Hi {{first_name}}, this is {{agent_name}} with {{intro_name}}. Please call us back at {{callback_number}}." />
+              </Field>
+            )}
+          </Section>
         </div>
       )}
 
-      <div className="bg-white border border-slate-200 rounded-xl p-6">
-        <h2 className="font-medium text-slate-900 mb-3">Add leads from a LeadGen list</h2>
-        <div className="flex gap-2">
-          <select value={selectedList} onChange={(e) => setSelectedList(e.target.value)} className="flex-1 border border-slate-300 rounded-md px-3 py-2 text-sm">
-            <option value="">Select a list</option>
-            {lists.map((l) => (
-              <option key={l.id} value={l.id}>{l.name}</option>
-            ))}
-          </select>
-          <button onClick={addLeadsFromList} className="text-sm bg-slate-900 text-white rounded-md px-4 py-2 hover:bg-slate-800">
-            Add
-          </button>
+      {tab === "numbers" && (
+        <NumberPool
+          campaignId={id!}
+          pool={numbers}
+          all={allNumbers}
+          onChange={() => act("numbers", async () => undefined)}
+          onError={setError}
+        />
+      )}
+
+      {tab === "leads" && <LeadsTab campaignId={id!} campaignActive={status === "active"} onChanged={load} />}
+
+      {tab === "versions" && <VersionsTab campaignId={id!} publishedVersionId={campaign.published_version_id} />}
+
+      {can("campaign.publish") && (
+        <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-slate-200 bg-white/95 backdrop-blur">
+          <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
+            <div className="text-sm">
+              {dirty ? (
+                <span className="text-amber-700">Unsaved changes</span>
+              ) : campaign.has_unpublished_changes || !campaign.published_version_id ? (
+                <span className="text-amber-700">Saved changes not published — live calls still use {campaign.published_version ? `v${campaign.published_version}` : "nothing yet"}</span>
+              ) : agentChanged ? (
+                <span className="text-amber-700">The agent changed since v{campaign.published_version} — publish to use it</span>
+              ) : (
+                <span className="text-slate-500">Live calls use v{campaign.published_version}</span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {dirty && <button onClick={() => setDraft({})} className={btnGhost}>Discard</button>}
+              {dirty && <button disabled={busy !== null} onClick={() => act("save", async () => { await saveDraft(); return "Saved as draft (not live yet)."; })} className={btnGhost}>Save draft</button>}
+              <button disabled={busy !== null} onClick={saveAndPublish} className={btnPrimary}>
+                {busy === "publish" ? "Publishing…" : "Save & publish"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+      <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
+      {children}
+    </div>
+  );
+}
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+      {children}
+      {hint && <p className="text-xs text-slate-400 mt-1">{hint}</p>}
+    </div>
+  );
+}
+
+function ScheduleButton({ timeZone, disabled, onSchedule }: { timeZone: string; disabled: boolean; onSchedule: (at: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [at, setAt] = useState("");
+  if (!open) return <button disabled={disabled} onClick={() => setOpen(true)} className={btnGhost}>Schedule…</button>;
+  return (
+    <div className="flex items-center gap-2">
+      <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} className={`${inputCls} py-1.5`} />
+      <span className="text-xs text-slate-500">{timeZone}</span>
+      <button disabled={disabled || !at} onClick={() => { onSchedule(at); setOpen(false); }} className={btnDark}>Set</button>
+      <button onClick={() => setOpen(false)} className="text-xs text-slate-500">Cancel</button>
+    </div>
+  );
+}
+
+function NumberPool(props: {
+  campaignId: string;
+  pool: PoolNumber[];
+  all: Array<{ id: string; phone_e164: string; provider: string; vapi_phone_number_id: string | null }>;
+  onChange: () => void;
+  onError: (e: string) => void;
+}) {
+  const inPool = new Set(props.pool.map((n) => n.id));
+  const candidates = props.all.filter((n) => !inPool.has(n.id) && n.provider !== "plivo");
+  const [selected, setSelected] = useState<string[]>([]);
+
+  async function add() {
+    try {
+      await api(`/voice/campaigns/${props.campaignId}/numbers`, { method: "POST", body: { phoneNumberIds: selected } });
+      setSelected([]);
+      props.onChange();
+    } catch (err) {
+      props.onError(err instanceof ApiError ? err.message : "Failed to add numbers.");
+    }
+  }
+  async function remove(numberId: string) {
+    await api(`/voice/campaigns/${props.campaignId}/numbers/${numberId}`, { method: "DELETE" });
+    props.onChange();
+  }
+
+  return (
+    <div className="grid md:grid-cols-2 gap-4">
+      <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <h2 className="text-sm font-semibold mb-1">In this campaign</h2>
+        <p className="text-xs text-slate-500 mb-3">The dialer prefers a number with the lead's area code, otherwise the least recently used one.</p>
+        <div className="space-y-1">
+          {props.pool.map((n) => (
+            <div key={n.id} className="flex items-center justify-between text-sm border-b border-slate-100 py-1.5">
+              <span>
+                {formatPhone(n.phone_e164)}
+                {!n.vapi_phone_number_id && <span className="ml-2 text-xs text-amber-700">not connected to VAPI — won't dial</span>}
+              </span>
+              <span className="flex items-center gap-3">
+                <span className="text-xs text-slate-400">{n.last_used_at ? `used ${new Date(n.last_used_at).toLocaleString()}` : "unused"}</span>
+                <button onClick={() => remove(n.id)} className="text-xs text-slate-500 hover:text-red-600">Remove</button>
+              </span>
+            </div>
+          ))}
+          {props.pool.length === 0 && <div className="text-sm text-slate-500">No numbers yet. Add at least one VAPI-connected number before starting.</div>}
+        </div>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <h2 className="text-sm font-semibold mb-3">Add numbers</h2>
+        <div className="space-y-1 max-h-72 overflow-auto">
+          {candidates.map((n) => (
+            <label key={n.id} className="flex items-center gap-2 text-sm py-1">
+              <input type="checkbox" checked={selected.includes(n.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, n.id] : selected.filter((x) => x !== n.id))} />
+              {formatPhone(n.phone_e164)}
+              {!n.vapi_phone_number_id && <span className="text-xs text-amber-700">not on VAPI</span>}
+            </label>
+          ))}
+          {candidates.length === 0 && (
+            <div className="text-sm text-slate-500">
+              No other numbers. <Link to="/voice?tab=numbers" className="text-red-600 hover:underline">Buy or sync numbers</Link>.
+            </div>
+          )}
+        </div>
+        <button disabled={selected.length === 0} onClick={add} className={`${btnDark} mt-3`}>Add {selected.length || ""} to pool</button>
+      </div>
+    </div>
+  );
+}
+
+const LEAD_STATUSES = ["", "queued", "retry_scheduled", "dialing", "done", "dnc"];
+
+function LeadsTab({ campaignId, campaignActive, onChanged }: { campaignId: string; campaignActive: boolean; onChanged: () => void }) {
+  const [leads, setLeads] = useState<CampaignLead[]>([]);
+  const [filter, setFilter] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
+  const [result, setResult] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [single, setSingle] = useState({ firstName: "", lastName: "", company: "", phone: "", state: "" });
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [dispositions, setDispositions] = useState<Record<string, { label: string; color: string }>>({});
+
+  async function load() {
+    const q = filter ? `?status=${filter}` : "";
+    const r = await api<{ leads: CampaignLead[] }>(`/voice/campaigns/${campaignId}/leads${q}`);
+    setLeads(r.leads);
+  }
+  useEffect(() => {
+    load();
+  }, [filter]);
+  useEffect(() => {
+    api<{ dispositions: Array<{ key: string; label: string; color: string }> }>("/voice/dispositions").then((r) =>
+      setDispositions(Object.fromEntries(r.dispositions.map((d) => [d.key, d])))
+    );
+  }, []);
+
+  async function upload(file: File) {
+    setErr(null);
+    setResult(null);
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/voice/campaigns/${campaignId}/leads/import`, {
+        method: "POST",
+        credentials: "include",
+        headers: { Authorization: `Bearer ${getAccessToken()}` },
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Import failed.");
+      setResult(
+        `Imported ${data.imported} lead(s)` +
+          (data.duplicates ? `, skipped ${data.duplicates} duplicate(s)` : "") +
+          (data.dncMarked ? `, ${data.dncMarked} on the DNC list (won't be called)` : "") +
+          "." +
+          (data.totalErrors ? ` ${data.totalErrors} row issue(s): ${data.errors.slice(0, 3).join(" ")}` : "")
+      );
+      await load();
+      onChanged();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  async function addSingle() {
+    setErr(null);
+    try {
+      await api(`/voice/campaigns/${campaignId}/leads/single`, { method: "POST", body: single });
+      setSingle({ firstName: "", lastName: "", company: "", phone: "", state: "" });
+      setResult("Lead added.");
+      await load();
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Failed to add lead.");
+    }
+  }
+
+  async function removeSelected() {
+    if (!confirm(`Remove ${selected.length} lead(s) from this campaign?`)) return;
+    const r = await api<{ removed: number }>(`/voice/campaigns/${campaignId}/leads/remove`, { method: "POST", body: { campaignLeadIds: selected } });
+    setSelected([]);
+    setResult(`Removed ${r.removed} lead(s). Leads mid-call are kept.`);
+    await load();
+    onChanged();
+  }
+
+  return (
+    <div className="space-y-4">
+      {err && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{err}</div>}
+      {result && <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-2">{result}</div>}
+      <div className="grid md:grid-cols-2 gap-4">
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <h2 className="text-sm font-semibold mb-1">Import CSV / Excel</h2>
+          <p className="text-xs text-slate-500 mb-3">
+            Recognised columns: company, first/last name, phone, email, title, address, service address, city, state, zip, current provider, customer type (ALC / non-ALC), lines, locations, contract end date, time zone. Other columns become placeholders, e.g. a column "Account Rep" is usable as {"{{account_rep}}"}.
+          </p>
+          <input ref={fileRef} type="file" accept=".csv,.xlsx" disabled={uploading} onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} className="text-sm" />
+          {uploading && <div className="text-xs text-slate-500 mt-2">Importing…</div>}
+          {campaignActive && <p className="text-xs text-slate-500 mt-2">The campaign is running — new leads are picked up right away.</p>}
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <h2 className="text-sm font-semibold mb-3">Add one lead</h2>
+          <div className="grid grid-cols-2 gap-2">
+            <input placeholder="First name" value={single.firstName} onChange={(e) => setSingle({ ...single, firstName: e.target.value })} className={inputCls} />
+            <input placeholder="Last name" value={single.lastName} onChange={(e) => setSingle({ ...single, lastName: e.target.value })} className={inputCls} />
+            <input placeholder="Company" value={single.company} onChange={(e) => setSingle({ ...single, company: e.target.value })} className={inputCls} />
+            <input placeholder="State (e.g. TX)" value={single.state} onChange={(e) => setSingle({ ...single, state: e.target.value })} className={inputCls} />
+            <input placeholder="Phone" value={single.phone} onChange={(e) => setSingle({ ...single, phone: e.target.value })} className={`${inputCls} col-span-2`} />
+          </div>
+          <button disabled={!single.phone} onClick={addSingle} className={`${btnDark} mt-3`}>Add lead</button>
         </div>
       </div>
 
+      <div className="flex items-center justify-between">
+        <select value={filter} onChange={(e) => setFilter(e.target.value)} className={`${inputCls} w-48`}>
+          {LEAD_STATUSES.map((s) => <option key={s} value={s}>{s ? s.replace("_", " ") : "All statuses"}</option>)}
+        </select>
+        {selected.length > 0 && <button onClick={removeSelected} className={btnGhost}>Remove {selected.length} selected</button>}
+      </div>
+
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 font-medium text-slate-900">Campaign leads ({leads.length})</div>
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
             <tr>
-              <th className="text-left px-4 py-2">Business</th>
-              <th className="text-left px-4 py-2">Phone</th>
-              <th className="text-left px-4 py-2">Status</th>
+              <th className="px-3 py-2 w-8">
+                <input type="checkbox" checked={leads.length > 0 && selected.length === leads.length} onChange={(e) => setSelected(e.target.checked ? leads.map((l) => l.id) : [])} />
+              </th>
+              <th className="text-left px-3 py-2">Lead</th>
+              <th className="text-left px-3 py-2">Phone</th>
+              <th className="text-left px-3 py-2">State</th>
+              <th className="text-left px-3 py-2">Status</th>
+              <th className="text-left px-3 py-2">Attempts</th>
+              <th className="text-left px-3 py-2">Last result</th>
+              <th className="text-left px-3 py-2">Next attempt</th>
             </tr>
           </thead>
           <tbody>
-            {leads.map((l) => (
-              <tr key={l.id} className="border-t border-slate-100">
-                <td className="px-4 py-2">{l.business_name}</td>
-                <td className="px-4 py-2 text-slate-500">{l.main_phone_e164}</td>
-                <td className="px-4 py-2 text-slate-500">{l.status}</td>
-              </tr>
-            ))}
-            {leads.length === 0 && (
-              <tr>
-                <td colSpan={3} className="px-4 py-6 text-center text-slate-500">No leads added yet.</td>
-              </tr>
-            )}
+            {leads.map((l) => {
+              const d = l.last_disposition ? dispositions[l.last_disposition] : null;
+              return (
+                <tr key={l.id} className="border-t border-slate-100">
+                  <td className="px-3 py-2"><input type="checkbox" checked={selected.includes(l.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, l.id] : selected.filter((x) => x !== l.id))} /></td>
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-slate-900">{[l.first_name, l.last_name].filter(Boolean).join(" ") || l.business_name}</div>
+                    {(l.first_name || l.last_name) && <div className="text-xs text-slate-500">{l.business_name}</div>}
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">{formatPhone(l.main_phone_e164)}{l.is_dnc && <span className="ml-1 text-xs text-red-600">DNC</span>}</td>
+                  <td className="px-3 py-2 text-slate-500">{l.state ?? "—"}</td>
+                  <td className="px-3 py-2 text-slate-600">{l.status.replace("_", " ")}</td>
+                  <td className="px-3 py-2 text-slate-600">{l.attempts}</td>
+                  <td className="px-3 py-2">{d ? <DispositionBadge label={d.label} color={d.color} /> : l.last_disposition ?? "—"}</td>
+                  <td className="px-3 py-2 text-xs text-slate-500">{l.next_attempt_at ? new Date(l.next_attempt_at).toLocaleString() : "—"}</td>
+                </tr>
+              );
+            })}
+            {leads.length === 0 && <tr><td colSpan={8} className="px-4 py-6 text-center text-slate-500">No leads{filter ? " with this status" : " yet"}.</td></tr>}
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function VersionsTab({ campaignId, publishedVersionId }: { campaignId: string; publishedVersionId: string | null }) {
+  const [versions, setVersions] = useState<Version[]>([]);
+  useEffect(() => {
+    api<{ versions: Version[] }>(`/voice/campaigns/${campaignId}/versions`).then((r) => setVersions(r.versions));
+  }, [campaignId, publishedVersionId]);
+  const rows = useMemo(() => versions, [versions]);
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+          <tr>
+            <th className="text-left px-4 py-2">Version</th>
+            <th className="text-left px-4 py-2">Published</th>
+            <th className="text-left px-4 py-2">By</th>
+            <th className="text-left px-4 py-2">Calls on this version</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((v) => (
+            <tr key={v.id} className="border-t border-slate-100">
+              <td className="px-4 py-2 font-medium">v{v.version} {v.id === publishedVersionId && <span className="ml-1 text-xs text-green-700">live</span>}</td>
+              <td className="px-4 py-2 text-slate-600">{new Date(v.created_at).toLocaleString()}</td>
+              <td className="px-4 py-2 text-slate-600">{v.published_by_name || "—"}</td>
+              <td className="px-4 py-2 text-slate-600">{v.calls}</td>
+            </tr>
+          ))}
+          {rows.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-500">Nothing published yet.</td></tr>}
+        </tbody>
+      </table>
     </div>
   );
 }

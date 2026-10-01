@@ -143,6 +143,16 @@ export default function App() {
         }
       />
       <Route
+        path="/voice/agents/:id"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <AgentNew />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/voice/campaigns/new"
         element={
           <ProtectedRoute>

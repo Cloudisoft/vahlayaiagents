@@ -1,5 +1,7 @@
 import { parse } from "csv-parse/sync";
 import ExcelJS from "exceljs";
+import { pool } from "../db/pool.js";
+import { computeQualityScore, normalizeLeadPhone } from "./enrichment.js";
 
 // Header aliases -> lead column. Anything not listed becomes a custom field
 // (usable in scripts as {{column_name}}).
@@ -99,4 +101,82 @@ export async function readRows(buffer: Buffer, filename: string): Promise<Record
     return rows;
   }
   return parse(buffer, { columns: true, skip_empty_lines: true, bom: true, relax_column_count: true });
+}
+
+
+export async function importLeads(
+  org: string,
+  records: Record<string, unknown>[],
+  opts: { leadListId: string | null; campaignId: string | null }
+) {
+  const { leadListId, campaignId } = opts;
+  let imported = 0;
+  let duplicates = 0;
+  const errors: string[] = [];
+  const dnc = await pool.query<{ phone_e164: string }>("select phone_e164 from dnc_entries where organization_id = $1", [org]);
+  const dncSet = new Set(dnc.rows.map((r) => r.phone_e164));
+  let dncMarked = 0;
+
+  for (const [i, raw] of records.entries()) {
+    const { fields: f, custom } = mapRow(raw);
+    const phoneE164 = normalizeLeadPhone(f.main_phone ?? null);
+    const contactName = [f.first_name, f.last_name].filter(Boolean).join(" ");
+    const businessName = f.business_name ?? (contactName || null);
+    if (!businessName && !phoneE164) {
+      errors.push(`Row ${i + 2}: no name or phone — skipped.`);
+      continue;
+    }
+    if (f.main_phone && !phoneE164) errors.push(`Row ${i + 2}: "${f.main_phone}" isn't a valid US number — imported without a dialable phone.`);
+    if (phoneE164 && (leadListId || campaignId)) {
+      const dup = await pool.query(
+        leadListId
+          ? "select 1 from leads where organization_id = $1 and lead_list_id = $2 and main_phone_e164 = $3 limit 1"
+          : `select 1 from campaign_leads cl join leads l on l.id = cl.lead_id
+             where l.organization_id = $1 and cl.campaign_id = $2 and l.main_phone_e164 = $3 limit 1`,
+        [org, leadListId ?? campaignId, phoneE164]
+      );
+      if (dup.rows.length) {
+        duplicates++;
+        continue;
+      }
+    }
+    const isDnc = phoneE164 ? dncSet.has(phoneE164) : false;
+    if (isDnc) dncMarked++;
+    const qualityScore = computeQualityScore({
+      businessName: businessName ?? phoneE164!,
+      address: f.address ?? null,
+      website: f.website ?? null,
+      mainPhoneE164: phoneE164,
+      businessEmail: f.business_email ?? null,
+      decisionMakerEmail: null,
+      lastVerifiedAt: null,
+    });
+    const ins = await pool.query(
+      `insert into leads (organization_id, lead_list_id, business_name, address, city, state, zip, website,
+         main_phone, main_phone_e164, business_email, industry, source, quality_score,
+         first_name, last_name, contact_title, service_address, current_provider, customer_type,
+         lines_count, locations_count, contract_end_date, time_zone, custom_fields, is_dnc, call_status)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'csv_import',$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+       returning id`,
+      [
+        org, leadListId, businessName ?? phoneE164, f.address ?? null, f.city ?? null, f.state ?? null, f.zip ?? null,
+        f.website ?? null, f.main_phone ?? null, phoneE164, f.business_email ?? null, f.industry ?? null, qualityScore,
+        f.first_name ?? null, f.last_name ?? null, f.contact_title ?? null, f.service_address ?? null,
+        f.current_provider ?? null, normalizeCustomerType(f.customer_type, f.current_provider),
+        parseCount(f.lines_count), parseCount(f.locations_count), parseDate(f.contract_end_date), f.time_zone ?? null,
+        JSON.stringify(custom), isDnc, isDnc ? "do_not_call" : "new",
+      ]
+    );
+    if (campaignId && phoneE164 && !isDnc) {
+      await pool.query(
+        `insert into campaign_leads (campaign_id, lead_id)
+         select $1, $2 where exists (select 1 from campaigns where id = $1 and organization_id = $3)
+         on conflict do nothing`,
+        [campaignId, ins.rows[0].id, org]
+      );
+    }
+    imported++;
+  }
+
+  return { imported, duplicates, dncMarked, errors: errors.slice(0, 50), totalErrors: errors.length };
 }

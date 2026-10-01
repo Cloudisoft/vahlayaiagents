@@ -1,135 +1,369 @@
-import { useEffect, useRef, useState } from "react";
-import { api } from "../../lib/api.js";
-import { getAccessToken } from "../../lib/api.js";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { api, ApiError, getAccessToken } from "../../lib/api.js";
+import { btnDark, btnGhost, formatPhone, formatSeconds, inputCls, useCan, useOrgEvents } from "../../lib/voice.js";
 
-interface ActiveCall {
+interface LiveCall {
   id: string;
   status: string;
-  to_number: string;
-  started_at: string | null;
-  lead_name: string | null;
+  direction: string;
+  to_number: string | null;
+  from_number: string | null;
+  created_at: string;
+  answered_at: string | null;
+  campaign_id: string | null;
+  campaign_name: string | null;
   agent_name: string | null;
+  lead_name: string | null;
+  business_name: string | null;
+  can_listen: boolean;
+  can_control: boolean;
+  turns: Array<{ speaker: string; text: string; role?: string }> | null;
 }
 
-interface TranscriptTurn {
+interface Line {
+  role: string;
   speaker: string;
   text: string;
+  partial: boolean;
+}
+
+const AUTO_LISTEN_KEY = "vahlay.liveMonitor.autoListen";
+const GAIN = 2.5;
+
+function readAutoListen(): boolean {
+  try {
+    return localStorage.getItem(AUTO_LISTEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+// Plays the raw 16-bit PCM stream relayed from VAPI. Gain lifts quiet phone
+// audio; the compressor acts as a limiter so the boost never clips.
+class PcmPlayer {
+  private ctx: AudioContext;
+  private gain: GainNode;
+  private nextTime = 0;
+  private pending: Uint8Array[] = [];
+  format: { sampleRate: number; channels: number } | null = null;
+
+  constructor() {
+    this.ctx = new AudioContext();
+    const limiter = this.ctx.createDynamicsCompressor();
+    limiter.threshold.value = -3;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.1;
+    this.gain = this.ctx.createGain();
+    this.gain.gain.value = GAIN;
+    this.gain.connect(limiter).connect(this.ctx.destination);
+  }
+
+  setFormat(sampleRate: number, channels: number) {
+    this.format = { sampleRate, channels };
+    const queued = this.pending;
+    this.pending = [];
+    for (const c of queued) this.push(c);
+  }
+
+  push(chunk: Uint8Array) {
+    if (!this.format) {
+      this.pending.push(chunk);
+      return;
+    }
+    const { sampleRate, channels } = this.format;
+    const samples = new Int16Array(chunk.buffer, chunk.byteOffset, Math.floor(chunk.byteLength / 2));
+    const frames = Math.floor(samples.length / channels);
+    if (frames === 0) return;
+    const buffer = this.ctx.createBuffer(1, frames, sampleRate);
+    const out = buffer.getChannelData(0);
+    for (let i = 0; i < frames; i++) {
+      let sum = 0;
+      for (let c = 0; c < channels; c++) sum += samples[i * channels + c];
+      out[i] = sum / channels / 32768;
+    }
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(this.gain);
+    const now = this.ctx.currentTime;
+    // Re-anchor if we fell behind (network hiccup) instead of piling up delay.
+    if (this.nextTime < now || this.nextTime - now > 1.5) this.nextTime = now + 0.08;
+    src.start(this.nextTime);
+    this.nextTime += buffer.duration;
+  }
+
+  resume() {
+    return this.ctx.resume();
+  }
+
+  close() {
+    this.ctx.close().catch(() => undefined);
+  }
 }
 
 export default function LiveCalls() {
-  const [calls, setCalls] = useState<ActiveCall[]>([]);
-  const [selectedCall, setSelectedCall] = useState<string | null>(null);
-  const [transcripts, setTranscripts] = useState<Record<string, TranscriptTurn[]>>({});
+  const can = useCan();
+  const [calls, setCalls] = useState<LiveCall[]>([]);
+  const [lines, setLines] = useState<Record<string, Line[]>>({});
+  const [focus, setFocus] = useState<string | null>(null);
+  const [listening, setListening] = useState<string | null>(null);
+  const [listenState, setListenState] = useState<string | null>(null);
+  const [autoListen, setAutoListen] = useState(readAutoListen);
+  const [connected, setConnected] = useState(true);
+  const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [text, setText] = useState("");
   const [transferTo, setTransferTo] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const playerRef = useRef<PcmPlayer | null>(null);
+  const listenWs = useRef<WebSocket | null>(null);
 
-  async function loadActive() {
-    const { calls } = await api<{ calls: ActiveCall[] }>("/voice/calls/active");
-    setCalls(calls);
-  }
-
-  useEffect(() => {
-    loadActive();
-    const interval = setInterval(loadActive, 5000);
-
-    const token = getAccessToken();
-    if (token) {
-      const proto = window.location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${proto}://${window.location.host}/ws?token=${token}`);
-      wsRef.current = ws;
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === "transcript_turn") {
-          setTranscripts((prev) => ({
-            ...prev,
-            [data.callId]: [...(prev[data.callId] ?? []), { speaker: data.speaker, text: data.text }],
-          }));
-        } else if (data.type === "call_status") {
-          loadActive();
+  const load = useCallback(async () => {
+    const r = await api<{ calls: LiveCall[] }>("/voice/calls/active");
+    setCalls(r.calls);
+    setLines((prev) => {
+      const next = { ...prev };
+      for (const c of r.calls) {
+        if (!next[c.id] && c.turns?.length) {
+          next[c.id] = c.turns.map((t) => ({ role: t.role ?? (t.speaker === "Customer" ? "user" : "assistant"), speaker: t.speaker, text: t.text, partial: false }));
         }
-      };
-    }
-
-    return () => {
-      clearInterval(interval);
-      wsRef.current?.close();
-    };
+      }
+      return next;
+    });
   }, []);
 
-  async function transfer(callId: string) {
-    if (!transferTo) return;
-    setMessage(null);
+  useEffect(() => {
+    load();
+    const poll = setInterval(load, 15000);
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => {
+      clearInterval(poll);
+      clearInterval(tick);
+    };
+  }, [load]);
+
+  useOrgEvents((e) => {
+    if (e.type === "connected") {
+      setConnected(true);
+      load();
+    } else if (e.type === "disconnected") setConnected(false);
+    else if (e.type === "transcript" && e.callId) {
+      const callId = e.callId;
+      setLines((prev) => {
+        const list = [...(prev[callId] ?? [])];
+        const last = list[list.length - 1];
+        const line: Line = { role: String(e.role), speaker: String(e.speaker), text: String(e.text), partial: Boolean(e.partial) };
+        // A partial replaces the previous partial from the same side.
+        if (last && last.partial && last.role === line.role) list[list.length - 1] = line;
+        else list.push(line);
+        return { ...prev, [callId]: list.slice(-200) };
+      });
+    } else if (e.type === "call_status" || e.type === "call_ended") {
+      load();
+      if (e.type === "call_ended" && e.callId === listening) stopListening();
+    }
+  });
+
+  const stopListening = useCallback(() => {
+    listenWs.current?.close();
+    listenWs.current = null;
+    playerRef.current?.close();
+    playerRef.current = null;
+    setListening(null);
+    setListenState(null);
+  }, []);
+
+  const startListening = useCallback(
+    (callId: string) => {
+      stopListening();
+      const token = getAccessToken();
+      if (!token) return;
+      const player = new PcmPlayer();
+      player.resume().catch(() => undefined);
+      playerRef.current = player;
+      const proto = window.location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${proto}://${window.location.host}/ws/listen?token=${encodeURIComponent(token)}&callId=${callId}`);
+      ws.binaryType = "arraybuffer";
+      listenWs.current = ws;
+      setListening(callId);
+      setFocus(callId);
+      setListenState("Connecting…");
+      ws.onmessage = (m) => {
+        if (m.data instanceof ArrayBuffer) {
+          player.push(new Uint8Array(m.data));
+          return;
+        }
+        try {
+          const msg = JSON.parse(m.data);
+          if (msg.type === "format") {
+            player.setFormat(msg.sampleRate, msg.channels);
+            setListenState(`Listening · ${msg.sampleRate / 1000} kHz ${msg.channels === 2 ? "stereo" : "mono"}${msg.ambiguous ? " (auto-detected)" : ""}`);
+          }
+        } catch {
+          // ignore
+        }
+      };
+      ws.onopen = () => setListenState("Buffering audio…");
+      ws.onclose = (ev) => {
+        if (listenWs.current !== ws) return;
+        setListenState(ev.code === 1000 ? "Call ended" : ev.reason || "Listen stream closed");
+        playerRef.current?.close();
+        playerRef.current = null;
+        listenWs.current = null;
+        setListening(null);
+      };
+    },
+    [stopListening]
+  );
+
+  useEffect(() => () => stopListening(), [stopListening]);
+
+  // Auto-listen: follow the newest answered call when nothing is playing.
+  useEffect(() => {
+    if (!autoListen || listening || !can("calls.listen")) return;
+    const next = calls.find((c) => c.status === "answered" && c.can_listen);
+    if (next) startListening(next.id);
+  }, [autoListen, listening, calls, startListening, can]);
+
+  function toggleAuto(v: boolean) {
+    setAutoListen(v);
     try {
-      await api(`/voice/calls/${callId}/transfer`, { method: "POST", body: { transferTo } });
-      setMessage("Transfer initiated.");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Transfer failed.");
+      localStorage.setItem(AUTO_LISTEN_KEY, v ? "1" : "0");
+    } catch {
+      // storage unavailable — setting just won't persist
     }
   }
 
-  async function endCall(callId: string) {
-    setMessage(null);
+  async function control(kind: "whisper" | "barge" | "transfer" | "end") {
+    if (!focus) return;
+    if (kind === "end" && !confirm("Hang up this call now?")) return;
+    setNotice(null);
     try {
-      await api(`/voice/calls/${callId}/end`, { method: "POST" });
-      setMessage("End call requested.");
-      await loadActive();
+      const body = kind === "transfer" ? { transferTo } : kind === "end" ? {} : { message: text };
+      await api(`/voice/calls/${focus}/${kind}`, { method: "POST", body });
+      setNotice({
+        kind: "ok",
+        text: { whisper: "Instruction sent to the agent (caller can't hear it).", barge: "The agent is saying your message now.", transfer: "Transfer started.", end: "Hang-up sent." }[kind],
+      });
+      if (kind === "whisper" || kind === "barge") setText("");
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "End call failed.");
+      setNotice({ kind: "err", text: err instanceof ApiError ? err.message : "Request failed." });
     }
   }
+
+  const focused = calls.find((c) => c.id === focus) ?? null;
+  const focusLines = focus ? lines[focus] ?? [] : [];
 
   return (
-    <div className="max-w-5xl space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">Live Calls</h1>
-      <p className="text-sm text-slate-500">
-        Real-time transcript streams over the platform's own connection. Listen/whisper (live audio bridging) require a
-        media-streaming telephony integration and aren't implemented — transfer and end-call are real actions.
-      </p>
-
-      {message && <div className="text-sm text-slate-700 bg-slate-100 rounded-md p-2">{message}</div>}
-
-      {calls.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-sm text-slate-500">
-          No active calls right now.
+    <div className="max-w-7xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <Link to="/voice" className="text-xs text-slate-500 hover:text-slate-700">← Voice AI</Link>
+          <h1 className="text-2xl font-semibold text-slate-900">Live Monitor</h1>
         </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-4">
-          {calls.map((c) => (
-            <div key={c.id} className="bg-white border border-slate-200 rounded-xl p-4">
-              <div className="flex justify-between items-center mb-2">
-                <span className="font-medium text-slate-900">{c.lead_name ?? c.to_number}</span>
-                <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5">{c.status}</span>
+        <div className="flex items-center gap-4 text-sm">
+          {!connected && <span className="text-amber-700">Reconnecting to live updates…</span>}
+          {can("calls.listen") && (
+            <label className="flex items-center gap-2 text-slate-700">
+              <input type="checkbox" checked={autoListen} onChange={(e) => toggleAuto(e.target.checked)} />
+              Auto-listen to new calls
+            </label>
+          )}
+          {listening && <button onClick={stopListening} className={btnGhost}>Stop listening</button>}
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-[380px_1fr] gap-4">
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          <div className="px-4 py-2 text-xs uppercase text-slate-500 bg-slate-50">{calls.length} live call(s)</div>
+          {calls.map((c) => {
+            const started = new Date(c.answered_at ?? c.created_at).getTime();
+            return (
+              <div
+                key={c.id}
+                onClick={() => setFocus(c.id)}
+                className={`px-4 py-3 border-t border-slate-100 cursor-pointer ${focus === c.id ? "bg-red-50" : "hover:bg-slate-50"}`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {can("calls.listen") && (
+                      <input
+                        type="checkbox"
+                        title="Listen"
+                        disabled={!c.can_listen}
+                        checked={listening === c.id}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => (e.target.checked ? startListening(c.id) : stopListening())}
+                      />
+                    )}
+                    <span className="font-medium text-slate-900">{c.lead_name ?? formatPhone(c.direction === "inbound" ? c.from_number : c.to_number)}</span>
+                  </div>
+                  <span className={`text-xs rounded-full px-2 py-0.5 ${c.status === "answered" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-600"}`}>
+                    {c.status === "answered" ? formatSeconds((now - started) / 1000) : c.status}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  {c.direction === "inbound" ? "Inbound · " : ""}
+                  {formatPhone(c.direction === "inbound" ? c.from_number : c.to_number)} · {c.agent_name ?? "agent"} · {c.campaign_name ?? "—"}
+                </div>
+                {listening === c.id && listenState && <div className="text-xs text-red-600 mt-1">🔊 {listenState}</div>}
               </div>
-              <div className="text-xs text-slate-500 mb-3">Agent: {c.agent_name ?? "—"}</div>
-              <div className="bg-slate-50 rounded-md p-2 h-32 overflow-y-auto text-xs space-y-1 mb-3">
-                {(transcripts[c.id] ?? []).map((t, i) => (
-                  <div key={i}>
-                    <span className="font-medium">{t.speaker}: </span>
-                    {t.text}
+            );
+          })}
+          {calls.length === 0 && <div className="px-4 py-8 text-sm text-center text-slate-500">No calls in progress.</div>}
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl flex flex-col min-h-[520px]">
+          {focused ? (
+            <>
+              <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <div className="font-medium text-slate-900">{focused.lead_name ?? "Unknown lead"}</div>
+                  <div className="text-xs text-slate-500">{focused.business_name} · {formatPhone(focused.to_number)}</div>
+                </div>
+                {can("calls.listen") && focused.can_listen && listening !== focused.id && (
+                  <button onClick={() => startListening(focused.id)} className={btnDark}>Listen</button>
+                )}
+              </div>
+              <div className="flex-1 overflow-auto px-4 py-3 space-y-2">
+                {focusLines.map((l, i) => (
+                  <div key={i} className={`flex ${l.role === "user" ? "justify-start" : "justify-end"}`}>
+                    <div className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${l.role === "user" ? "bg-slate-100 text-slate-800" : "bg-red-50 text-slate-800"} ${l.partial ? "opacity-60 italic" : ""}`}>
+                      <div className="text-[10px] uppercase text-slate-400 mb-0.5">{l.speaker}</div>
+                      {l.text}
+                    </div>
                   </div>
                 ))}
-                {(transcripts[c.id] ?? []).length === 0 && <span className="text-slate-400">Waiting for transcript...</span>}
+                {focusLines.length === 0 && <div className="text-sm text-slate-400 text-center mt-12">Waiting for the conversation…</div>}
               </div>
-              <div className="flex gap-2">
-                <input
-                  placeholder="Transfer to +1..."
-                  value={selectedCall === c.id ? transferTo : ""}
-                  onFocus={() => setSelectedCall(c.id)}
-                  onChange={(e) => setTransferTo(e.target.value)}
-                  className="flex-1 border border-slate-300 rounded-md px-2 py-1 text-xs"
-                />
-                <button onClick={() => transfer(c.id)} className="text-xs bg-slate-900 text-white rounded-md px-2 py-1">
-                  Transfer
-                </button>
-                <button onClick={() => endCall(c.id)} className="text-xs bg-red-600 text-white rounded-md px-2 py-1">
-                  End
-                </button>
-              </div>
-            </div>
-          ))}
+              {focused.can_control && (
+                <div className="border-t border-slate-100 p-3 space-y-2">
+                  {notice && <div className={`text-xs ${notice.kind === "ok" ? "text-green-700" : "text-red-600"}`}>{notice.text}</div>}
+                  {(can("calls.whisper") || can("calls.barge")) && (
+                    <div className="flex gap-2">
+                      <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Message for the agent…" className={inputCls} />
+                      {can("calls.whisper") && <button disabled={!text.trim()} onClick={() => control("whisper")} className={btnGhost} title="Private instruction to the AI — the caller doesn't hear it">Whisper</button>}
+                      {can("calls.barge") && <button disabled={!text.trim()} onClick={() => control("barge")} className={btnGhost} title="The agent says this to the caller now">Barge</button>}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    {can("calls.transfer") && (
+                      <>
+                        <input value={transferTo} onChange={(e) => setTransferTo(e.target.value)} placeholder="Transfer to (US number)" className={inputCls} />
+                        <button disabled={!transferTo} onClick={() => control("transfer")} className={btnGhost}>Transfer</button>
+                      </>
+                    )}
+                    {can("calls.end") && <button onClick={() => control("end")} className="bg-red-600 text-white text-sm rounded-md px-4 py-2 hover:bg-red-700 whitespace-nowrap">End call</button>}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="m-auto text-sm text-slate-500">Select a call to see its live transcript.</div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
