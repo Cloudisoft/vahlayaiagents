@@ -328,7 +328,7 @@ export async function sweepCalls(): Promise<void> {
   }
 }
 
-async function hangUp(call: any) {
+export async function hangUp(call: any) {
   try {
     if (call.monitor_control_url) {
       await controlVapiCall(call.monitor_control_url, { type: "end-call" });

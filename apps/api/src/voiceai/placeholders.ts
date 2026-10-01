@@ -18,8 +18,22 @@ export const BUILT_IN_PLACEHOLDERS = [
   "state",
 ] as const;
 
+const ALIASES: Record<string, string> = {
+  company: "company_name",
+  business_name: "company_name",
+  business: "company_name",
+  firstname: "first_name",
+  first: "first_name",
+  name: "first_name",
+  lastname: "last_name",
+  agent: "agent_name",
+  provider: "current_provider",
+  title: "contact_title",
+};
+
 function canonical(raw: string): string {
-  return raw.trim().toLowerCase().replace(/[\s-]+/g, "_").replace(/[^a-z0-9_]/g, "");
+  const key = raw.trim().toLowerCase().replace(/[\s-]+/g, "_").replace(/[^a-z0-9_]/g, "");
+  return ALIASES[key] ?? key;
 }
 
 export function normalizePlaceholders(text: string, customKeys: string[] = []): string {

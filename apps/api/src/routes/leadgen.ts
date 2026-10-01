@@ -1,6 +1,5 @@
 import { Router } from "express";
 import multer from "multer";
-import { parse } from "csv-parse/sync";
 import { stringify } from "csv-stringify/sync";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
@@ -8,6 +7,7 @@ import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { runLeadDiscovery } from "../leadgen/discoveryService.js";
 import { computeQualityScore, normalizeLeadPhone } from "../leadgen/enrichment.js";
+import { mapRow, normalizeCustomerType, parseCount, parseDate, readRows } from "../leadgen/leadImport.js";
 import { enqueueJob, isQueueEnabled } from "../services/queue.js";
 
 export const leadgenRouter = Router();
@@ -93,7 +93,7 @@ leadgenRouter.post("/search", async (req: AuthedRequest, res) => {
 // --- Leads ---
 
 leadgenRouter.get("/leads", async (req: AuthedRequest, res) => {
-  const { listId, search, state, industry, tag } = req.query as Record<string, string | undefined>;
+  const { listId, search, state, industry, tag, callStatus, customerType, provider, dnc } = req.query as Record<string, string | undefined>;
   const page = Math.max(1, Number(req.query.page ?? 1));
   const pageSize = Math.min(200, Number(req.query.pageSize ?? 50));
 
@@ -105,7 +105,10 @@ leadgenRouter.get("/leads", async (req: AuthedRequest, res) => {
   }
   if (search) {
     params.push(`%${search}%`);
-    conditions.push(`(business_name ilike $${params.length} or website ilike $${params.length} or business_email ilike $${params.length})`);
+    conditions.push(
+      `(business_name ilike $${params.length} or website ilike $${params.length} or business_email ilike $${params.length}` +
+        ` or first_name ilike $${params.length} or last_name ilike $${params.length} or main_phone_e164 like $${params.length})`
+    );
   }
   if (state) {
     params.push(state);
@@ -115,6 +118,19 @@ leadgenRouter.get("/leads", async (req: AuthedRequest, res) => {
     params.push(industry);
     conditions.push(`(industry = $${params.length} or category = $${params.length})`);
   }
+  if (callStatus) {
+    params.push(callStatus);
+    conditions.push(`call_status = $${params.length}`);
+  }
+  if (customerType) {
+    params.push(customerType);
+    conditions.push(`customer_type = $${params.length}`);
+  }
+  if (provider) {
+    params.push(`%${provider}%`);
+    conditions.push(`current_provider ilike $${params.length}`);
+  }
+  if (dnc === "true" || dnc === "false") conditions.push(dnc === "true" ? "is_dnc" : "not is_dnc");
   if (tag) {
     params.push(tag);
     conditions.push(`$${params.length} = any(tags)`);
@@ -223,61 +239,80 @@ leadgenRouter.post("/leads/deduplicate", async (req: AuthedRequest, res) => {
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 leadgenRouter.post("/leads/import", upload.single("file"), async (req: AuthedRequest, res) => {
-  if (!req.file) return res.status(400).json({ error: "No CSV file provided." });
-  let records: Record<string, string>[];
+  if (!req.file) return res.status(400).json({ error: "No CSV or XLSX file provided." });
+  let records: Record<string, unknown>[];
   try {
-    records = parse(req.file.buffer, { columns: (h: string[]) => h.map((c) => c.trim().toLowerCase()), skip_empty_lines: true });
+    records = await readRows(req.file.buffer, req.file.originalname);
   } catch (err) {
-    return res.status(400).json({ error: `Invalid CSV: ${(err as Error).message}` });
+    return res.status(400).json({ error: `Could not read file: ${(err as Error).message}` });
   }
 
+  const org = req.auth!.organizationId;
   const leadListId = (req.body.leadListId as string) || null;
+  const campaignId = (req.body.campaignId as string) || null;
   let imported = 0;
+  let duplicates = 0;
   const errors: string[] = [];
-  const orNull = (v: string | undefined) => (v && v.trim().length > 0 ? v.trim() : null);
+  const dnc = await pool.query<{ phone_e164: string }>("select phone_e164 from dnc_entries where organization_id = $1", [org]);
+  const dncSet = new Set(dnc.rows.map((r) => r.phone_e164));
+  let dncMarked = 0;
 
-  for (const r of records) {
-    const businessName = orNull(r.business_name ?? r.company ?? r.name);
-    if (!businessName) {
-      errors.push("Row missing business name — skipped.");
+  for (const [i, raw] of records.entries()) {
+    const { fields: f, custom } = mapRow(raw);
+    const phoneE164 = normalizeLeadPhone(f.main_phone ?? null);
+    const contactName = [f.first_name, f.last_name].filter(Boolean).join(" ");
+    const businessName = f.business_name ?? (contactName || null);
+    if (!businessName && !phoneE164) {
+      errors.push(`Row ${i + 2}: no name or phone — skipped.`);
       continue;
     }
-    const website = orNull(r.website);
-    const businessEmail = orNull(r.email ?? r.business_email);
-    const phoneE164 = normalizeLeadPhone(orNull(r.phone ?? r.main_phone));
+    if (f.main_phone && !phoneE164) errors.push(`Row ${i + 2}: "${f.main_phone}" isn't a valid US number — imported without a dialable phone.`);
+    if (phoneE164 && leadListId) {
+      const dup = await pool.query("select 1 from leads where organization_id = $1 and lead_list_id = $2 and main_phone_e164 = $3 limit 1", [org, leadListId, phoneE164]);
+      if (dup.rows.length) {
+        duplicates++;
+        continue;
+      }
+    }
+    const isDnc = phoneE164 ? dncSet.has(phoneE164) : false;
+    if (isDnc) dncMarked++;
     const qualityScore = computeQualityScore({
-      businessName,
-      address: orNull(r.address),
-      website,
+      businessName: businessName ?? phoneE164!,
+      address: f.address ?? null,
+      website: f.website ?? null,
       mainPhoneE164: phoneE164,
-      businessEmail,
+      businessEmail: f.business_email ?? null,
       decisionMakerEmail: null,
       lastVerifiedAt: null,
     });
-    await pool.query(
+    const ins = await pool.query(
       `insert into leads (organization_id, lead_list_id, business_name, address, city, state, zip, website,
-         main_phone, main_phone_e164, business_email, industry, source, quality_score)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'csv_import',$13)`,
+         main_phone, main_phone_e164, business_email, industry, source, quality_score,
+         first_name, last_name, contact_title, service_address, current_provider, customer_type,
+         lines_count, locations_count, contract_end_date, time_zone, custom_fields, is_dnc, call_status)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'csv_import',$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+       returning id`,
       [
-        req.auth!.organizationId,
-        leadListId,
-        businessName,
-        orNull(r.address),
-        orNull(r.city),
-        orNull(r.state),
-        orNull(r.zip),
-        website,
-        orNull(r.phone ?? r.main_phone),
-        phoneE164,
-        businessEmail,
-        orNull(r.industry ?? r.category),
-        qualityScore,
+        org, leadListId, businessName ?? phoneE164, f.address ?? null, f.city ?? null, f.state ?? null, f.zip ?? null,
+        f.website ?? null, f.main_phone ?? null, phoneE164, f.business_email ?? null, f.industry ?? null, qualityScore,
+        f.first_name ?? null, f.last_name ?? null, f.contact_title ?? null, f.service_address ?? null,
+        f.current_provider ?? null, normalizeCustomerType(f.customer_type, f.current_provider),
+        parseCount(f.lines_count), parseCount(f.locations_count), parseDate(f.contract_end_date), f.time_zone ?? null,
+        JSON.stringify(custom), isDnc, isDnc ? "do_not_call" : "new",
       ]
     );
+    if (campaignId && phoneE164 && !isDnc) {
+      await pool.query(
+        `insert into campaign_leads (campaign_id, lead_id)
+         select $1, $2 where exists (select 1 from campaigns where id = $1 and organization_id = $3)
+         on conflict do nothing`,
+        [campaignId, ins.rows[0].id, org]
+      );
+    }
     imported++;
   }
 
-  res.json({ imported, errors });
+  res.json({ imported, duplicates, dncMarked, errors: errors.slice(0, 50), totalErrors: errors.length });
 });
 
 leadgenRouter.get("/leads/export", async (req: AuthedRequest, res) => {
