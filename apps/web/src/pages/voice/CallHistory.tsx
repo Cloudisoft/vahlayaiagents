@@ -254,7 +254,7 @@ function CallDrawer({ callId, dispositions, onClose, onChanged }: { callId: stri
               {call.voicemail_detected && <Info label="Voicemail">{call.voicemail_method ?? "detected"}</Info>}
               {call.transfer_status && <Info label="Transfer">{call.transfer_status}</Info>}
               {call.callback_at && <Info label="Callback">{new Date(call.callback_at).toLocaleString()}</Info>}
-              {call.evaluation_score != null && <Info label="AI score">{call.evaluation_score} / 10</Info>}
+              {call.evaluation_score != null && <Info label="AI score">{call.evaluation_score} / 100</Info>}
               {call.error && <Info label="Error">{call.error}</Info>}
             </div>
 
@@ -309,6 +309,9 @@ function CallDrawer({ callId, dispositions, onClose, onChanged }: { callId: stri
                   {call.events.map((e: any, i: number) => (
                     <div key={i}>
                       <span className="text-slate-400">{e.at ? new Date(e.at).toLocaleTimeString() : ""}</span> {e.type?.replace(/_/g, " ")}
+                      {e.status ? `: ${e.status}` : ""}
+                      {e.name ? `: ${e.name}${e.args?.outcome ? ` (${e.args.outcome})` : ""}` : ""}
+                      {e.destination ? ` → ${e.destination}` : ""}
                       {e.message ? ` — "${e.message}"` : ""}
                       {e.to ? ` → ${e.to}` : ""}
                       {e.key ? ` → ${e.key}` : ""}

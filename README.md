@@ -102,7 +102,16 @@ npm run worker
 Resume parsing, coverage bulk lookups, LeadGen discovery, and call audits run
 as BullMQ jobs once `REDIS_URL` is set (they no-op without it, or process
 inline with a safety cap so nothing silently stalls in dev). The Voice AI
-campaign dialer runs independently of Redis on a 15s tick.
+campaign dialer runs in the worker independently of Redis (5 s tick, plus an
+immediate refill whenever a call ends). Only one worker dials at a time — a
+database lease prevents double-dialing if you run several.
+
+### 5. Tests
+
+```bash
+cd apps/api
+npm test
+```
 
 ## What's implemented, by phase
 
@@ -130,12 +139,41 @@ real completeness-based quality scoring, lead lists, CSV import/export.
 tones), Cartesia voice library sync, DID sync/assignment, campaign CRUD with
 a real stats card, lead assignment from LeadGen lists.
 
-**Phase 6 — Live calling**: a server-side dialer enforcing concurrency from
-the database (never the frontend), DNC/opt-out detection with immediate
-suppression, an LLM-driven turn-based call flow, a WebSocket-backed live
-call panel (transfer/end are real actions; listen/whisper are explicitly
-not implemented — they need media-streaming telephony), and filterable
-call history with signed recording URLs.
+**Phase 6 — Live calling (VAPI engine)**: US campaigns call through VAPI
+using your Twilio numbers, Cartesia voices and a per-call assistant built
+from the campaign's *published* version.
+
+- *Save & publish*: edits are drafts until published; each publish freezes
+  agent, voice, script, knowledge base, calling and voicemail rules into a
+  version. Calls already in progress finish on their version. You're warned
+  if the linked agent changed since the last publish.
+- *Dialer*: concurrency, per-lead calling windows (lead's own time zone,
+  optional lunch break), max attempts, retry delay, lead cooldown, ring
+  timeout, DNC check before every dial, number pool with area-code
+  matching then least-recently-used, scheduled starts, pause/resume/stop/
+  restart. Ten identical provider errors in a row pause the campaign with
+  the reason shown, instead of burning through the list.
+- *Call behaviour*: the caller can interrupt instantly, the agent waits for
+  them to finish, checks in after 7 s of silence, voicemail detection with a
+  personalised voicemail, warm transfer, DNC requests honoured mid-call,
+  callbacks booked in the lead's time zone, live knowledge-base lookups.
+- *Dispositions*: one per call, first match wins (DNC → voicemail →
+  transferred → disconnected in transfer → not in service → busy/no answer
+  → hung up → disconnected → AI outcome). Manual dispositions always win.
+- *Reliability*: missed webhooks are covered by sweeps that reconcile with
+  VAPI, close calls that never rang, and hang up stuck calls.
+- *Live Monitor*: live transcripts, listen-in (server-relayed audio — VAPI's
+  listen URL never reaches the browser), whisper to the AI, barge, transfer
+  and end, each behind its own permission.
+- *Call Records*: filters (digits-only phone search, transcript full-text
+  search, campaign, result, direction, talk time, dates), a detail drawer
+  with recording, summary, score, transcript and timeline, and CSV export.
+
+Getting a campaign dialing: add your VAPI private key (Settings → AI
+Providers), Twilio credentials (Settings → Telephony) and optionally Cartesia;
+then Voice AI → Numbers → *Sync from VAPI* (or buy a number, which also
+connects it to VAPI), Agents → *Import from VAPI* or *Spectrum Business
+template*, create a campaign, add numbers + leads, *Save & publish*, *Start*.
 
 **Phase 7 — AI Call Auditor**: real long-recording transcription (ffmpeg
 segmentation around Whisper's actual size limit), best-effort speaker
