@@ -246,6 +246,7 @@ export default function VoiceHome({ tab }: { tab: Tab }) {
 
       {tab === "numbers" && (
         <div className="space-y-4">
+          <ProvidersCard />
           <p className="text-sm text-slate-500">
             Campaigns dial out through VAPI using these numbers; the dialer prefers one matching the lead's area code. Only numbers listed here are used — your other Twilio numbers are never touched. Removing a number here doesn't change it in Twilio or VAPI.
           </p>
@@ -474,6 +475,50 @@ function InboundControl(props: {
         <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${n.inbound_enabled ? "left-[18px]" : "left-0.5"}`} />
       </button>
       <span className={n.inbound_enabled ? "text-green-700" : "text-slate-400"}>{busy ? "Saving…" : n.inbound_enabled ? "On" : "Off"}</span>
+    </div>
+  );
+}
+
+interface Providers {
+  twilio: { connected: boolean; balanceUsd?: number | null; error?: string };
+  vapi: { connected: boolean; monthToDateUsd?: number; monthToDateCalls?: number; billingUrl: string; error?: string };
+}
+
+function ProvidersCard() {
+  const q = useApi<Providers>("/voice/phone-numbers/providers");
+  const p = q.data;
+  const usd = (n: number | null | undefined) => (n == null ? "—" : `$${n.toFixed(2)}`);
+  return (
+    <div className="grid md:grid-cols-2 gap-3">
+      <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <div className="text-xs text-slate-500 uppercase">Twilio balance</div>
+        {!p ? (
+          <div className="skeleton h-7 w-24 mt-1" />
+        ) : p.twilio.connected ? (
+          <div className="text-2xl font-semibold text-slate-900">{usd(p.twilio.balanceUsd)}</div>
+        ) : (
+          <div className="text-sm text-amber-700 mt-1">Not connected — check the Twilio keys in Settings.</div>
+        )}
+        <div className="text-xs text-slate-500 mt-1">Buy numbers below: search an area code or state, then Buy. New numbers connect to VAPI automatically.</div>
+      </div>
+      <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <div className="text-xs text-slate-500 uppercase">VAPI — spent this month</div>
+        {!p ? (
+          <div className="skeleton h-7 w-24 mt-1" />
+        ) : p.vapi.connected ? (
+          <div className="text-2xl font-semibold text-slate-900">
+            {usd(p.vapi.monthToDateUsd)} <span className="text-sm font-normal text-slate-500">· {p.vapi.monthToDateCalls ?? 0} calls</span>
+          </div>
+        ) : (
+          <div className="text-sm text-amber-700 mt-1">{p.vapi.error ?? "Not connected"}</div>
+        )}
+        <div className="text-xs text-slate-500 mt-1">
+          VAPI doesn't share the remaining credit balance through its API.{" "}
+          <a href={p?.vapi.billingUrl ?? "https://dashboard.vapi.ai/org/billing"} target="_blank" rel="noreferrer" className="text-red-600 hover:underline">
+            See balance in VAPI ↗
+          </a>
+        </div>
+      </div>
     </div>
   );
 }

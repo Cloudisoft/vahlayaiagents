@@ -13,6 +13,7 @@ import {
   listVapiPhoneNumbers,
   pointVapiNumberAtServer,
   updateVapiPhoneNumber,
+  vapiSpend,
 } from "../voiceai/vapiClient.js";
 
 export const phoneNumbersRouter = Router();
@@ -31,6 +32,25 @@ phoneNumbersRouter.get("/", async (req: AuthedRequest, res) => {
     [req.auth!.organizationId]
   );
   res.json({ phoneNumbers: result.rows });
+});
+
+// Provider status for the Numbers page: Twilio balance (Twilio publishes
+// it) and VAPI month-to-date spend (VAPI has no balance API for keys).
+phoneNumbersRouter.get("/providers", async (req: AuthedRequest, res) => {
+  const org = req.auth!.organizationId;
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const [twilio, vapi] = await Promise.allSettled([
+    twilioFor(org).then(async (t) => ({ balance: await t.getBalance() })),
+    vapiSpend(org, monthStart, now),
+  ]);
+  res.json({
+    twilio: twilio.status === "fulfilled" ? { connected: true, balanceUsd: twilio.value.balance } : { connected: false, error: (twilio.reason as Error).message },
+    vapi:
+      vapi.status === "fulfilled"
+        ? { connected: true, monthToDateUsd: vapi.value.cost, monthToDateCalls: vapi.value.calls, billingUrl: "https://dashboard.vapi.ai/org/billing" }
+        : { connected: false, error: (vapi.reason as Error).message, billingUrl: "https://dashboard.vapi.ai/org/billing" },
+  });
 });
 
 phoneNumbersRouter.post("/sync", async (req: AuthedRequest, res) => {
