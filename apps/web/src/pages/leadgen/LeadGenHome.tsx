@@ -1,146 +1,37 @@
-import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { api, ApiError, getAccessToken, refreshSession } from "../../lib/api.js";
+import { lazy, Suspense, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { api, ApiError } from "../../lib/api.js";
 import { invalidate, useApi } from "../../lib/useApi.js";
-import { Banner, Btn, Card, Empty, I, Icon, Modal, Skeleton, StatCard, ago, inputCls, uploadFiles } from "../../components/ui.js";
+import { Banner, Btn, Card, Empty, I, Icon, Modal, Skeleton, StatCard, ago, copyText, inputCls, uploadFiles } from "../../components/ui.js";
+import { Pill, type Meta } from "./shared.js";
+import type { Filters } from "./LeadsPanel.js";
 
-interface LeadList { id: string; name: string; lead_count: string; created_at: string }
-interface Lead {
-  id: string;
-  business_name: string;
-  city: string | null;
-  state: string | null;
-  website: string | null;
-  main_phone: string | null;
-  main_phone_e164: string | null;
-  business_email: string | null;
-  decision_maker_email: string | null;
-  decision_maker_name: string | null;
-  industry: string | null;
-  category: string | null;
-  quality_score: number | null;
-  source: string;
-  created_at: string;
-}
-interface Summary { leads: number; with_email: number; with_phone: number; with_website: number; avg_quality: number | null; new_7d: number; lists: number; googlePlaces: boolean }
+const DiscoverForm = lazy(() => import("./DiscoverForm.js"));
+const JobsPanel = lazy(() => import("./JobsPanel.js"));
+const LeadsPanel = lazy(() => import("./LeadsPanel.js"));
 
-const PAGE = 50;
-const pct = (n: number, d: number) => (d ? `${Math.round((n / d) * 100)}%` : "—");
+interface LeadList { id: string; name: string; lead_count: string; created_at: string; description: string | null }
+interface Summary { leads: number; discovered: number; with_email: number; with_phone: number; with_website: number; qualified: number; processing: number; avg_score: number | null; new_7d: number; activeJobs: number; jobs: number; lists: number }
 
-async function authedDownload(path: string, name: string) {
-  const send = () => fetch(path, { credentials: "include", headers: { Authorization: `Bearer ${getAccessToken()}` } });
-  let r = await send();
-  if (r.status === 401 && (await refreshSession())) r = await send();
-  if (!r.ok) throw new Error("Export failed.");
-  const url = URL.createObjectURL(await r.blob());
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-}
-
-function Quality({ v }: { v: number | null }) {
-  if (v == null) return <span className="text-xs text-slate-400">—</span>;
-  const tone = v >= 70 ? "bg-green-500" : v >= 40 ? "bg-amber-400" : "bg-slate-300";
-  return (
-    <span className="inline-flex items-center gap-1.5" title={`Quality ${v}/100: how complete and reachable this lead is`}>
-      <span className="flex gap-0.5">{[20, 40, 60, 80, 100].map((s) => <span key={s} className={`w-1.5 h-3 rounded-sm ${v >= s - 10 ? tone : "bg-slate-100"}`} />)}</span>
-      <span className="text-xs tabular-nums text-slate-500">{v}</span>
-    </span>
-  );
-}
+const TABS = [["discover", "Discover"], ["runs", "Discovery runs"], ["leads", "Leads"], ["lists", "Lists & CRM"]] as const;
+type Tab = (typeof TABS)[number][0];
 
 export default function LeadGenHome() {
-  const { data: summary, reload: reloadSummary } = useApi<Summary>("/leadgen/summary");
-  const { data: listData, reload: reloadLists } = useApi<{ lists: LeadList[] }>("/leadgen/lists");
-  const lists = listData?.lists ?? [];
-  const [listId, setListId] = useState<string>("");
-  const [q, setQ] = useState("");
-  const [debQ, setDebQ] = useState("");
-  useEffect(() => {
-    const t = setTimeout(() => setDebQ(q), 250);
-    return () => clearTimeout(t);
-  }, [q]);
-  const [page, setPage] = useState(1);
-  useEffect(() => setPage(1), [listId, debQ]);
-  const qs = new URLSearchParams({ pageSize: String(PAGE), page: String(page), ...(listId ? { listId } : {}), ...(debQ ? { search: debQ } : {}) }).toString();
-  const { data: leadData, reload: reloadLeads } = useApi<{ leads: Lead[]; total: number }>(`/leadgen/leads?${qs}`);
-  const leads = leadData?.leads ?? [];
-  const total = leadData?.total ?? 0;
-
-  const [form, setForm] = useState({ keywords: "", city: "", state: "" });
-  const [searching, setSearching] = useState(false);
-  const [msg, setMsg] = useState<{ kind: "ok" | "error" | "info"; text: string } | null>(null);
-  const [sel, setSel] = useState<Set<string>>(new Set());
-  useEffect(() => setSel(new Set()), [qs]);
-  const [showImport, setShowImport] = useState(false);
-  const [newList, setNewList] = useState<string | null>(null);
-
-  const refreshAll = async () => {
-    await Promise.all([reloadLeads(), reloadLists(), reloadSummary()]);
-    invalidate("/leadgen/");
-  };
-
-  async function search() {
-    setSearching(true);
-    setMsg(null);
-    try {
-      const r = await api<{ message: string; leadListId: string; savedCount?: number; duplicateCount?: number; totalFound?: number; errors?: string[] }>("/leadgen/search", {
-        method: "POST",
-        body: { keywords: form.keywords, city: form.city || undefined, state: form.state || undefined },
-      });
-      setListId(r.leadListId);
-      setMsg({
-        kind: "ok",
-        text: r.savedCount !== undefined ? `Found ${r.totalFound} businesses · ${r.savedCount} new leads saved · ${r.duplicateCount} already in your database.` : r.message,
-      });
-      await refreshAll();
-    } catch (e) {
-      setMsg({ kind: "error", text: e instanceof ApiError ? e.message : "Search failed." });
-    } finally {
-      setSearching(false);
-    }
-  }
-
-  async function bulkDelete() {
-    if (!confirm(`Delete ${sel.size} lead${sel.size === 1 ? "" : "s"}?`)) return;
-    await api("/leadgen/leads/bulk-delete", { method: "POST", body: { ids: Array.from(sel) } });
-    setSel(new Set());
-    await refreshAll();
-  }
-  async function dedupe() {
-    const r = await api<{ removed: number }>("/leadgen/leads/deduplicate", { method: "POST" });
-    setMsg({ kind: "ok", text: r.removed ? `Removed ${r.removed} duplicate lead${r.removed === 1 ? "" : "s"}.` : "No duplicates found." });
-    await refreshAll();
-  }
-  async function deleteList(id: string) {
-    if (!confirm("Delete this list? Its leads stay in your database.")) return;
-    await api(`/leadgen/lists/${id}`, { method: "DELETE" });
-    if (listId === id) setListId("");
-    await refreshAll();
-  }
-  async function createList() {
-    if (!newList?.trim()) return;
-    const r = await api<{ list: LeadList }>("/leadgen/lists", { method: "POST", body: { name: newList.trim() } });
-    setNewList(null);
-    await reloadLists();
-    setListId(r.list.id);
-  }
+  const [params, setParams] = useSearchParams();
+  const tab = (params.get("tab") ?? (params.get("job") ? "runs" : "leads")) as Tab;
+  const { data: meta } = useApi<Meta>("/leadgen/meta");
+  const { data: summary, reload: reloadSummary } = useApi<Summary>("/leadgen/summary", { refreshMs: 10000 });
+  const [filters, setFilters] = useState<Filters>({ sort: "score" });
+  const go = (t: Tab, extra: Record<string, string> = {}) => setParams({ tab: t, ...extra }, { replace: true });
+  const pct = (n: number) => (summary?.leads ? `${Math.round((n / summary.leads) * 100)}%` : "—");
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center"><Icon d={I.search} size={20} /></span>
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Lead Discovery</h1>
-            <p className="text-sm text-slate-500">Find local businesses, enrich them with website contacts, and keep one clean lead database.</p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <Btn onClick={() => setShowImport(true)}><Icon d={I.upload} size={15} /> Import</Btn>
-          <Btn onClick={() => authedDownload(`/api/leadgen/leads/export${listId ? `?listId=${listId}` : ""}`, "leads.csv").catch((e) => setMsg({ kind: "error", text: e.message }))}><Icon d={I.download} size={15} /> Export CSV</Btn>
+      <div className="flex items-center gap-3">
+        <span className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center"><Icon d={I.search} size={20} /></span>
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Lead Discovery</h1>
+          <p className="text-sm text-slate-500">Find businesses, enrich and validate their data, and let AI qualify them against what you sell.</p>
         </div>
       </div>
 
@@ -149,142 +40,122 @@ export default function LeadGenHome() {
           Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[88px]" />)
         ) : (
           <>
-            <StatCard label="Leads" value={summary.leads.toLocaleString()} icon={I.users} hint={summary.new_7d ? `+${summary.new_7d} this week` : `${summary.lists} lists`} />
-            <StatCard label="With a phone" value={pct(summary.with_phone, summary.leads)} icon={I.phone} hint={`${summary.with_phone.toLocaleString()} leads`} />
-            <StatCard label="With an email" value={pct(summary.with_email, summary.leads)} icon={I.mail} hint={`${summary.with_email.toLocaleString()} leads`} />
-            <StatCard label="Avg. quality" value={summary.avg_quality ?? "—"} icon={I.star} hint="completeness, 0–100" />
+            <StatCard label="Leads" value={summary.leads.toLocaleString()} icon={I.users} hint={summary.processing ? `${summary.processing} being processed` : `+${summary.new_7d} this week`} />
+            <StatCard label="Qualified" value={summary.qualified.toLocaleString()} icon={I.star} tone="text-green-600" hint={summary.avg_score != null ? `avg. score ${summary.avg_score}` : "not scored yet"} />
+            <StatCard label="Reachable" value={pct(summary.with_phone)} icon={I.phone} hint={`with phone · ${pct(summary.with_email)} with email`} />
+            <StatCard label="Discovery runs" value={summary.jobs} icon={I.search} hint={summary.activeJobs ? `${summary.activeJobs} running now` : "none running"} tone={summary.activeJobs ? "text-sky-600" : ""} />
           </>
         )}
       </div>
 
-      <Card
-        title="Discover businesses"
-        action={summary && (summary.googlePlaces ? <span className="text-[11px] font-medium text-green-700 bg-green-50 rounded-full px-2 py-0.5">Google Places connected</span> : <Link to="/settings" className="text-[11px] font-medium text-amber-700 bg-amber-50 rounded-full px-2 py-0.5 hover:underline">Add a Google Places key →</Link>)}
-      >
-        <form
-          className="grid sm:grid-cols-12 gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (form.keywords.trim().length >= 2) search();
-          }}
-        >
-          <div className="sm:col-span-5 relative">
-            <Icon d={I.search} size={15} className="absolute left-3 top-2.5 text-slate-400" />
-            <input className={`${inputCls} pl-9`} placeholder="What kind of business? e.g. roofing contractors" value={form.keywords} onChange={(e) => setForm({ ...form, keywords: e.target.value })} />
-          </div>
-          <input className={`${inputCls} sm:col-span-3`} placeholder="City" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} />
-          <input className={`${inputCls} sm:col-span-2`} placeholder="State" value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} />
-          <Btn type="submit" kind="primary" className="sm:col-span-2" disabled={searching || form.keywords.trim().length < 2}>{searching ? "Searching…" : "Search"}</Btn>
-        </form>
-        {searching && (
-          <div className="mt-3 h-1 rounded-full bg-slate-100 overflow-hidden"><div className="h-full w-1/3 bg-red-500 animate-progress" /></div>
-        )}
-        <p className="text-xs text-slate-500 mt-2">Each search creates a list. Results are de-duplicated against every lead you already have (by phone, or name and city), websites are checked for contact emails, and phone numbers are normalized to E.164.</p>
-      </Card>
-
-      {msg && <Banner kind={msg.kind} onClose={() => setMsg(null)}>{msg.text}</Banner>}
-
-      <div className="grid lg:grid-cols-4 gap-5">
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-slate-900 text-sm">Lists</h2>
-            <button type="button" className="text-xs text-red-600 hover:underline" onClick={() => setNewList("")}>+ New</button>
-          </div>
-          {newList !== null && (
-            <form className="flex gap-1" onSubmit={(e) => { e.preventDefault(); createList(); }}>
-              <input autoFocus className={`${inputCls} py-1.5`} placeholder="List name" value={newList} onChange={(e) => setNewList(e.target.value)} />
-              <Btn type="submit" kind="primary">Add</Btn>
-            </form>
-          )}
-          <nav className="bg-white border border-slate-200 rounded-2xl p-1.5 max-h-[60vh] overflow-y-auto">
-            <ListItem active={!listId} onClick={() => setListId("")} name="All leads" count={summary?.leads ?? 0} />
-            {lists.map((l) => (
-              <ListItem key={l.id} active={listId === l.id} onClick={() => setListId(l.id)} name={l.name} count={Number(l.lead_count)} sub={ago(l.created_at)} onDelete={() => deleteList(l.id)} />
-            ))}
-          </nav>
-        </div>
-
-        <div className="lg:col-span-3 bg-white border border-slate-200 rounded-2xl overflow-hidden h-fit">
-          <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-slate-100">
-            <div className="relative flex-1 min-w-[180px]">
-              <Icon d={I.search} size={15} className="absolute left-2.5 top-2.5 text-slate-400" />
-              <input className={`${inputCls} pl-8 py-1.5`} placeholder="Search name, website, email or phone" value={q} onChange={(e) => setQ(e.target.value)} />
-            </div>
-            <Btn kind="ghost" onClick={dedupe} title="Remove leads with the same phone or the same name and city">Remove duplicates</Btn>
-          </div>
-          {sel.size > 0 && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-red-50/60 border-b border-red-100 animate-fade-in">
-              <span className="text-sm font-medium text-slate-700">{sel.size} selected</span>
-              <Btn kind="danger" onClick={bulkDelete}><Icon d={I.trash} size={14} /> Delete</Btn>
-              <button type="button" className="ml-auto text-xs text-slate-500" onClick={() => setSel(new Set())}>Clear</button>
-            </div>
-          )}
-          {!leadData ? (
-            <div className="p-4 space-y-2">{Array.from({ length: 5 }, (_, i) => <Skeleton key={i} className="h-10" />)}</div>
-          ) : !leads.length ? (
-            <Empty icon={I.search} title={debQ ? "No leads match" : "No leads here yet"}>{debQ ? "Try a different search." : "Run a discovery search above or import a CSV/Excel file."}</Empty>
-          ) : (
-            <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-[11px] uppercase tracking-wide text-slate-400 bg-slate-50/60">
-                    <tr>
-                      <th className="pl-4 py-2 w-8"><input type="checkbox" checked={sel.size === leads.length} onChange={(e) => setSel(e.target.checked ? new Set(leads.map((l) => l.id)) : new Set())} /></th>
-                      <th className="text-left px-3 py-2">Business</th>
-                      <th className="text-left px-3 py-2">Contact</th>
-                      <th className="text-left px-3 py-2">Website</th>
-                      <th className="text-left px-3 py-2">Quality</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {leads.map((l) => (
-                      <tr key={l.id} className={`hover:bg-slate-50/70 ${sel.has(l.id) ? "bg-red-50/30" : ""}`}>
-                        <td className="pl-4 py-2.5"><input type="checkbox" checked={sel.has(l.id)} onChange={(e) => { const s = new Set(sel); e.target.checked ? s.add(l.id) : s.delete(l.id); setSel(s); }} /></td>
-                        <td className="px-3 py-2.5">
-                          <div className="font-medium text-slate-800">{l.business_name}</div>
-                          <div className="text-xs text-slate-400">{[l.category ?? l.industry, [l.city, l.state].filter(Boolean).join(", ")].filter(Boolean).join(" · ") || "—"}</div>
-                        </td>
-                        <td className="px-3 py-2.5 text-xs">
-                          <div className="text-slate-700 tabular-nums">{l.main_phone_e164 ?? l.main_phone ?? <span className="text-slate-300">no phone</span>}</div>
-                          <div className="text-slate-500 truncate max-w-[220px]">{l.business_email ?? l.decision_maker_email ?? <span className="text-slate-300">no email</span>}</div>
-                        </td>
-                        <td className="px-3 py-2.5 text-xs">
-                          {l.website ? <a href={l.website} target="_blank" rel="noreferrer" className="text-red-600 hover:underline truncate inline-block max-w-[200px] align-bottom">{l.website.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</a> : <span className="text-slate-300">—</span>}
-                        </td>
-                        <td className="px-3 py-2.5"><Quality v={l.quality_score} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="flex items-center justify-between px-4 py-2.5 border-t border-slate-100 text-xs text-slate-500">
-                <span>{(page - 1) * PAGE + 1}–{Math.min(page * PAGE, total)} of {total.toLocaleString()}</span>
-                <div className="flex gap-1">
-                  <Btn kind="ghost" disabled={page === 1} onClick={() => setPage(page - 1)}>‹ Prev</Btn>
-                  <Btn kind="ghost" disabled={page * PAGE >= total} onClick={() => setPage(page + 1)}>Next ›</Btn>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+      <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
+        {TABS.map(([k, l]) => (
+          <button key={k} type="button" onClick={() => go(k)} className={`relative px-3.5 py-2 text-sm whitespace-nowrap ${tab === k ? "text-red-600 font-medium" : "text-slate-500 hover:text-slate-800"}`}>
+            {l}
+            {k === "runs" && summary?.activeJobs ? <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse align-middle" /> : null}
+            {tab === k && <span className="absolute left-2 right-2 -bottom-px h-0.5 bg-red-600 rounded-full" />}
+          </button>
+        ))}
       </div>
 
-      {showImport && <ImportModal lists={lists} listId={listId} onClose={() => setShowImport(false)} onDone={async (t) => { setShowImport(false); setMsg({ kind: "ok", text: t }); await refreshAll(); }} />}
+      <Suspense fallback={<Skeleton className="h-96" />}>
+        <div key={tab} className="animate-fade-in">
+          {!meta ? (
+            <Skeleton className="h-96" />
+          ) : tab === "discover" ? (
+            <DiscoverForm meta={meta} onCreated={(id) => { invalidate("/leadgen/"); reloadSummary(); go("runs", { job: id }); }} />
+          ) : tab === "runs" ? (
+            <JobsPanel selected={params.get("job")} onSelect={(id) => go("runs", id ? { job: id } : {})} onViewLeads={(jobId) => { setFilters({ sort: "score", jobId }); go("leads"); }} />
+          ) : tab === "leads" ? (
+            <LeadsPanel meta={meta} filters={filters} setFilters={setFilters} />
+          ) : (
+            <ListsAndCrm onOpenList={(listId) => { setFilters({ sort: "score", listId }); go("leads"); }} />
+          )}
+        </div>
+      </Suspense>
     </div>
   );
 }
 
-function ListItem({ active, onClick, name, count, sub, onDelete }: { active: boolean; onClick: () => void; name: string; count: number; sub?: string; onDelete?: () => void }) {
+function ListsAndCrm({ onOpenList }: { onOpenList: (id: string) => void }) {
+  const { data: listData, reload } = useApi<{ lists: LeadList[] }>("/leadgen/lists");
+  const { data: crm, reload: reloadCrm } = useApi<{ webhookUrl: string | null; hasSecret: boolean; exports: Array<{ id: string; destination: string; target: string | null; lead_count: number; status: string; error: string | null; created_at: string; by: string | null }> }>("/leadgen/crm");
+  const lists = listData?.lists ?? [];
+  const [name, setName] = useState("");
+  const [showImport, setShowImport] = useState(false);
+  const [url, setUrl] = useState<string | null>(null);
+  const [secret, setSecret] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const hookUrl = url ?? crm?.webhookUrl ?? "";
+
+  async function saveHook(rotate = false) {
+    try {
+      const r = await api<{ secret?: string }>("/leadgen/crm", { method: "PUT", body: { webhookUrl: hookUrl.trim() || null, rotateSecret: rotate } });
+      if (r.secret) setSecret(r.secret);
+      setMsg({ kind: "ok", text: "CRM webhook saved." });
+      setUrl(null);
+      reloadCrm();
+    } catch (e) {
+      setMsg({ kind: "error", text: e instanceof ApiError ? e.message : "Couldn't save." });
+    }
+  }
+
   return (
-    <div className={`group flex items-center gap-2 rounded-xl px-3 py-2 cursor-pointer transition-colors ${active ? "bg-red-50 text-red-700" : "hover:bg-slate-50 text-slate-700"}`} onClick={onClick}>
-      <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium truncate">{name}</div>
-        {sub && <div className="text-[11px] text-slate-400">{sub}</div>}
+    <div className="grid lg:grid-cols-2 gap-5">
+      <Card title="Lists" action={<Btn onClick={() => setShowImport(true)}><Icon d={I.upload} size={14} /> Import CSV / Excel</Btn>}>
+        <form className="flex gap-2 mb-3" onSubmit={async (e) => { e.preventDefault(); if (!name.trim()) return; await api("/leadgen/lists", { method: "POST", body: { name: name.trim() } }); setName(""); reload(); }}>
+          <input className={`${inputCls} py-1.5`} placeholder="New list name (e.g. Q4 roofing campaign)" value={name} onChange={(e) => setName(e.target.value)} />
+          <Btn type="submit" kind="primary" disabled={!name.trim()}>Create</Btn>
+        </form>
+        {!listData ? <Skeleton className="h-40" /> : !lists.length ? <Empty icon={I.users} title="No lists yet">Each discovery run creates one automatically.</Empty> : (
+          <ul className="divide-y divide-slate-100">
+            {lists.map((l) => (
+              <li key={l.id} className="py-2.5 flex items-center gap-3 group">
+                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onOpenList(l.id)}>
+                  <div className="text-sm font-medium text-slate-800 truncate group-hover:text-red-600">{l.name}</div>
+                  <div className="text-[11px] text-slate-400">{l.description ?? "List"} · {ago(l.created_at)}</div>
+                </button>
+                <span className="text-sm tabular-nums text-slate-600">{Number(l.lead_count).toLocaleString()}</span>
+                <button type="button" className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-600" onClick={async () => { if (confirm("Delete this list? Its leads stay in your database.")) { await api(`/leadgen/lists/${l.id}`, { method: "DELETE" }); reload(); } }} aria-label="Delete list"><Icon d={I.trash} size={14} /></button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
+      <div className="space-y-5">
+        <Card title="CRM webhook">
+          <p className="text-sm text-slate-600">Qualified leads are posted as signed JSON to your CRM, Zapier, Make or n8n. Each request carries an <code className="text-xs bg-slate-100 rounded px-1">X-Vahlay-Signature: sha256=…</code> header (HMAC of the body with your secret).</p>
+          {msg && <div className="mt-2"><Banner kind={msg.kind} onClose={() => setMsg(null)}>{msg.text}</Banner></div>}
+          <div className="flex gap-2 mt-3">
+            <input className={`${inputCls} py-1.5`} placeholder="https://hooks.your-crm.com/…" value={hookUrl} onChange={(e) => setUrl(e.target.value)} />
+            <Btn kind="primary" onClick={() => saveHook(false)}>Save</Btn>
+          </div>
+          {crm?.hasSecret && <button type="button" className="text-xs text-slate-500 hover:text-red-600 mt-2" onClick={() => confirm("Create a new signing secret? Your CRM must be updated with it.") && saveHook(true)}>Rotate signing secret</button>}
+          {secret && (
+            <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 p-2 text-xs">
+              <div className="font-medium text-amber-800">Signing secret — copy it now, it won't be shown again:</div>
+              <div className="flex items-center gap-2 mt-1"><code className="break-all">{secret}</code><button type="button" onClick={() => copyText(secret)} className="text-amber-700"><Icon d={I.copy} size={13} /></button></div>
+            </div>
+          )}
+        </Card>
+        <Card title="Export & hand-off history">
+          {!crm?.exports.length ? <p className="text-sm text-slate-500">Exports, CRM pushes and campaign hand-offs are listed here.</p> : (
+            <ul className="divide-y divide-slate-100 text-sm">
+              {crm.exports.map((e) => (
+                <li key={e.id} className="py-2 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-slate-700">{{ csv: "CSV export", xlsx: "Excel export", crm_webhook: "CRM webhook", voice_campaign: "Voice AI campaign" }[e.destination] ?? e.destination}{e.target ? ` · ${e.target}` : ""}</div>
+                    <div className="text-[11px] text-slate-400">{e.by ?? "—"} · {ago(e.created_at)}{e.error ? ` · ${e.error}` : ""}</div>
+                  </div>
+                  <Pill tone={e.status === "failed" ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-600"}>{e.lead_count} leads</Pill>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
       </div>
-      <span className="text-xs tabular-nums text-slate-400">{count.toLocaleString()}</span>
-      {onDelete && (
-        <button type="button" className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-600" onClick={(e) => { e.stopPropagation(); onDelete(); }} aria-label="Delete list"><Icon d={I.x} size={14} /></button>
-      )}
+      {showImport && <ImportModal lists={lists} listId="" onClose={() => setShowImport(false)} onDone={(t) => { setShowImport(false); setMsg({ kind: "ok", text: `${t} Select them in Leads and choose “Re-enrich” to validate and score them.` }); reload(); invalidate("/leadgen/"); }} />}
     </div>
   );
 }

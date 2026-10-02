@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { getAccessToken, refreshSession } from "../lib/api.js";
 
 // Shared building blocks for module pages (HR, Coverage, LeadGen, QC).
@@ -105,7 +106,7 @@ export function Modal({ title, onClose, children, wide = false }: { title: strin
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, [onClose]);
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto">
       <div className="fixed inset-0 bg-slate-900/40 animate-fade-in" onClick={onClose} />
       <div className={`relative w-full ${wide ? "max-w-3xl" : "max-w-lg"} bg-white rounded-2xl shadow-xl animate-pop-in my-8 max-h-[calc(100vh-4rem)] flex flex-col`}>
@@ -115,7 +116,8 @@ export function Modal({ title, onClose, children, wide = false }: { title: strin
         </div>
         <div className="p-5 overflow-y-auto">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

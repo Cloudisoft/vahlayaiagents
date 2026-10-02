@@ -1,11 +1,11 @@
 // Worker process bootstrap. Run with `npm run worker --workspace=apps/api`.
 import { isQueueEnabled } from "../services/queue.js";
 import { startCoverageWorker } from "./coverageWorker.js";
-import { startLeadgenWorker } from "./leadgenWorker.js";
 import { startDialer } from "../voiceai/dialer.js";
 import { sweepArtifactsAndReviews } from "../voiceai/callReview.js";
 import { startQcWorker } from "../services/qc/pipeline.js";
 import { startHrWorker } from "../services/hr/worker.js";
+import { startDiscoveryWorker } from "../leadgen/engine/jobs.js";
 import { processNextBulkJob } from "../services/phoneIntel/bulkJobs.js";
 import { rebuildAll } from "../services/phoneIntel/recompute.js";
 import { pool } from "../db/pool.js";
@@ -17,8 +17,7 @@ if (!isQueueEnabled()) {
   );
 } else {
   startCoverageWorker();
-  startLeadgenWorker();
-  console.log("[worker] Redis connected. coverage-bulk-lookup, leadgen-discovery and call-audit workers started.");
+  console.log("[worker] Redis connected. coverage-bulk-lookupand call-audit workers started.");
 }
 
 // Voice AI campaign dialer (VAPI). Independent of Redis: it needs only the
@@ -74,3 +73,7 @@ startQcWorker(2);
 // Vahlay HR: resume screening, approved candidate messages, reminders and
 // AI interview calls (database-queued).
 startHrWorker(3);
+
+// Lead Discovery: source requests, enrichment, validation and AI
+// qualification (database-queued).
+startDiscoveryWorker();
