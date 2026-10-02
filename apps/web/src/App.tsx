@@ -5,6 +5,7 @@ import { Link, Navigate, Outlet, Route, Routes, useLocation } from "react-router
 import Login from "./pages/Login.js";
 import ProtectedRoute from "./components/ProtectedRoute.js";
 import Navbar from "./components/Navbar.js";
+import NewVersionBanner from "./components/NewVersionBanner.js";
 import VoiceLayout from "./components/VoiceLayout.js";
 
 // Pages load on demand so the first screen ships only what it needs.
@@ -103,6 +104,7 @@ function AppShell() {
     <ProtectedRoute>
       <div className="min-h-screen bg-slate-50">
         <Navbar />
+        <NewVersionBanner />
         {!isHome && (
           <div className="max-w-6xl mx-auto px-6 pt-4">
             <Link to="/" className="text-sm text-slate-500 hover:text-red-600">
@@ -125,6 +127,7 @@ function VoiceShell() {
     <ProtectedRoute>
       <div className="min-h-screen bg-slate-50">
         <Navbar />
+        <NewVersionBanner />
         <VoiceLayout>
           <Suspense fallback={<PageFallback />}>
             <PageTransition />

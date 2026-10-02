@@ -224,27 +224,26 @@ export default function AgentNew() {
         <div className="grid grid-cols-[2fr_1fr_1fr] gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">AI model (from VAPI)</label>
-            <div className="flex gap-2">
-              <select
-                value={form.llmProvider}
-                onChange={(e) => setForm((f) => ({ ...f, llmProvider: e.target.value, llmModel: "" }))}
-                className={`${inputCls} w-28`}
-                aria-label="Model provider"
-              >
-                {(catalog?.providers ?? [{ provider: "openai", label: "OpenAI", models: [] }]).map((p) => (
-                  <option key={p.provider} value={p.provider}>{p.label}</option>
-                ))}
-              </select>
-              <select value={form.llmModel} onChange={(e) => set("llmModel", e.target.value)} className={inputCls} aria-label="Model">
-                <option value="">Campaign default (gpt-4o-mini)</option>
-                {form.llmModel && !catalog?.providers.find((p) => p.provider === form.llmProvider)?.models.includes(form.llmModel) && (
-                  <option value={form.llmModel}>{form.llmModel}</option>
-                )}
-                {catalog?.providers
-                  .find((p) => p.provider === form.llmProvider)
-                  ?.models.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
+            <select
+              value={form.llmModel ? `${form.llmProvider}|${form.llmModel}` : ""}
+              onChange={(e) => {
+                const [p, ...m] = e.target.value.split("|");
+                setForm((f) => ({ ...f, llmProvider: p || "openai", llmModel: m.join("|") }));
+              }}
+              className={inputCls}
+              aria-label="Model"
+            >
+              <option value="">Campaign default (gpt-4o-mini)</option>
+              {form.llmModel && !catalog?.providers.find((p) => p.provider === form.llmProvider)?.models.includes(form.llmModel) && (
+                <option value={`${form.llmProvider}|${form.llmModel}`}>{form.llmProvider} · {form.llmModel}</option>
+              )}
+              {catalog?.providers.map((p) => (
+                <optgroup key={p.provider} label={p.provider === "anthropic" ? "Anthropic (Claude)" : p.label}>
+                  {p.models.map((m) => <option key={m} value={`${p.provider}|${m}`}>{m}</option>)}
+                </optgroup>
+              ))}
+            </select>
+            <p className="text-xs text-slate-500 mt-1">{catalog ? "Live list from VAPI — OpenAI, Anthropic (Claude), Google and Groq." : catalogError ? "" : "Loading VAPI's model list…"}</p>
             {catalogError && <p className="text-xs text-amber-700 mt-1">{catalogError}</p>}
           </div>
           <div>
