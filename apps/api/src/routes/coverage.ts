@@ -8,6 +8,7 @@ import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { stringify } from "csv-stringify/sync";
 import { getCoverageStats, lookupPhone, recordLookup, toLookupResult } from "../services/coverageService.js";
 import { resolveBulk } from "../services/phoneIntel/engine.js";
+import { carrierLabel } from "../services/phoneIntel/normalize.js";
 import { createBulkJob, createCompletedBulkJob, MAX_BULK } from "../services/phoneIntel/bulkJobs.js";
 import { AlreadyImportedError, startHistoricalImport } from "../services/phoneIntel/importer.js";
 import { budgetState, HARD_DAILY_CAP_USD } from "../services/phoneIntel/budget.js";
@@ -100,7 +101,7 @@ coverageRouter.post("/lookup/bulk", upload.single("file"), async (req: AuthedReq
     const seen = new Set<string>();
     for (const r of results) if (r.phoneE164 && !seen.has(r.phoneE164)) { seen.add(r.phoneE164); await recordLookup(org, req.auth!.userId, r.phoneOriginal, r.phoneE164, r); }
     const jobId = await createCompletedBulkJob(org, req.auth!.userId, fileName, rows, summary);
-    return res.json({ message: `Processed ${phones.length} numbers (${summary.twilioValidations} Twilio check(s)). Download the results below.`, results, summary, jobId });
+    return res.json({ message: `Processed ${phones.length} numbers — ${Math.round(summary.engineShare * 100)}% answered by the Vahlay engine. Download the results below.`, results, summary, jobId });
   }
   const jobId = await createBulkJob(org, req.auth!.userId, fileName, phones);
   res.status(202).json({
@@ -131,13 +132,26 @@ coverageRouter.get("/lookup/bulk/:id/results.csv", async (req: AuthedRequest, re
   const j = await pool.query("select file_name from coverage_bulk_jobs where id = $1 and organization_id = $2", [req.params.id, req.auth!.organizationId]);
   if (!j.rows[0]) return res.status(404).json({ error: "Job not found." });
   const r = await pool.query(
-    `select phone_original, phone_e164, line_type, carrier, round((confidence * 100)::numeric) as confidence_pct, likely_line_type, source, verified, twilio_used, error
+    `select phone_original, phone_e164, line_type, carrier, carrier_entity, round((confidence * 100)::numeric) as confidence_pct, likely_line_type, source, verified, error
      from coverage_bulk_results where job_id = $1 order by idx`,
     [req.params.id]
   );
+  const rows = r.rows.map((x) => ({
+    phone_original: x.phone_original,
+    phone_e164: x.phone_e164,
+    line_type: x.line_type,
+    carrier: carrierLabel(x.carrier_entity, x.carrier),
+    carrier_company: x.carrier_entity,
+    carrier_network: x.carrier,
+    confidence_pct: x.confidence_pct,
+    likely_line_type: x.likely_line_type,
+    answered_by: x.verified ? "verified" : x.source ? "vahlay_engine" : "",
+    source: x.source,
+    error: x.error,
+  }));
   res.setHeader("Content-Type", "text/csv");
   res.setHeader("Content-Disposition", `attachment; filename="lookup-results-${String(req.params.id).slice(0, 8)}.csv"`);
-  res.send(stringify(r.rows, { header: true }));
+  res.send(stringify(rows, { header: true, columns: ["phone_original", "phone_e164", "line_type", "carrier", "carrier_company", "carrier_network", "confidence_pct", "likely_line_type", "answered_by", "source", "error"] }));
 });
 
 // --- Intelligence: historical import, health and measured accuracy ---
@@ -202,8 +216,9 @@ coverageRouter.get("/intelligence", async (req: AuthedRequest, res) => {
     corrections: agg("correction"),
     portability30d: Object.fromEntries(ported.rows.map((r) => [r.kind, r.n])),
     unknownRate30d: unknownRate.rows[0].r,
-    budgetToday: budget,
-    last30d: { spentUsd: u.spent, lookups: u.lookups, twilioLookups: u.twilio, costPer1000: u.lookups ? (u.spent / u.lookups) * 1000 : null },
+    // Volumes only — lookup spend is never shown.
+    today: { lookups: budget.twilioLookups + budget.localLookups, engineLookups: budget.localLookups, verifications: budget.twilioLookups },
+    last30d: { lookups: u.lookups, engineLookups: u.lookups - u.twilio, verifications: u.twilio, engineShare: u.lookups ? (u.lookups - u.twilio) / u.lookups : null },
   });
 });
 
@@ -226,5 +241,5 @@ coverageRouter.put("/intelligence/price", requireRole("company_admin"), async (r
      on conflict (organization_id) do update set price_per_lookup_usd = excluded.price_per_lookup_usd, updated_at = now()`,
     [req.auth!.organizationId, parsed.data.priceUsd]
   );
-  res.json({ budget: await budgetState(req.auth!.organizationId) });
+  res.json({ ok: true });
 });

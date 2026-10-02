@@ -30,7 +30,8 @@ export function lineTypeFromTwilio(type: string | null | undefined): LineType {
 // Partnership dba Verizon", "Verizon Wireless"); statistics need one name
 // per operating company. Order matters: first match wins.
 const FAMILIES: Array<[RegExp, string]> = [
-  [/cellco|verizon wireless/i, "Verizon Wireless"],
+  [/cellcom/i, "Cellcom"],
+  [/cellco partnership|verizon wireless/i, "Verizon Wireless"],
   [/new cingular|at&t wireless|at&t mobility|aerial comm|cricket/i, "AT&T Wireless"],
   [/t-?mobile|omnipoint|suncom|metropcs|powertel|voicestream/i, "T-Mobile"],
   [/sprint spectrum|sprintcom|nextel/i, "Sprint"],
@@ -70,6 +71,50 @@ export function normalizeCarrier(raw: string | null | undefined): string | null 
     .replace(/\s*\([^)]*\)?\s*$/, "")
     .replace(/[,.\s-]+$/, "")
     .trim() || null;
+}
+
+const SMALL_WORDS = new Set(["of", "the", "and", "dba", "de", "del"]);
+const KEEP_UPPER = new Set(["PCS", "AT&T", "MCI", "TCG", "USA", "US", "XO", "TPX", "CLEC", "ILEC", "LEC", "TDS", "GTE", "SBC", "II", "III", "LP", "PR", "PSTN"]);
+
+// The licensed company behind a number, as the carrier records name it:
+// "NEW CINGULAR WIRELESS PCS, LLC - GA" -> "New Cingular Wireless PCS".
+// Kept alongside the network family so sub-entities (AT&T's New Cingular,
+// Pacific Bell, BellSouth...) are shown rather than merged away.
+export function carrierEntity(raw: string | null | undefined): string | null {
+  let s = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (!s || /^unknown$/i.test(s) || /^n\/?a$/i.test(s)) return null;
+  s = s
+    .replace(/:\d+$/, "") // "Verizon Wireless:6006"
+    .replace(/\s+-\s+[A-Za-z]{2}$/, "") // state tag "- GA"
+    .replace(/,?\s*\b(inc|llc|l\.l\.c|corp|corporation|ltd|lp|l\.p)\b\.?(?=\s|$|,)/gi, "")
+    .replace(/[,.\s-]+$/, "")
+    .trim();
+  if (!s) return null;
+  const letters = s.replace(/[^A-Za-z]/g, "");
+  const shouting = letters.length > 3 && letters === letters.toUpperCase();
+  const words = s.split(" ").map((w, i) => {
+    const bare = w.replace(/[^A-Za-z&]/g, "");
+    if (KEEP_UPPER.has(bare.toUpperCase())) return w.toUpperCase();
+    if (!shouting && /[a-z]/.test(w)) return w; // already mixed case
+    const lower = w.toLowerCase();
+    if (i > 0 && SMALL_WORDS.has(lower)) return lower;
+    return lower.replace(/(^|[-/(])([a-z])/g, (_, p, c) => p + c.toUpperCase());
+  });
+  return words.join(" ");
+}
+
+// "New Cingular Wireless PCS (AT&T Wireless)"; just the family when the
+// entity adds nothing.
+export function carrierLabel(entity: string | null | undefined, family: string | null | undefined): string | null {
+  // "AT&T (wireline)" -> "AT&T wireline", "Lumen (CenturyLink / Level 3)" -> "Lumen".
+  const fam = family?.replace(/ \(wireline\)$/, " wireline").replace(/ \(.*\)$/, "") ?? null;
+  if (!entity) return fam;
+  if (!fam) return entity;
+  const e = entity.toLowerCase().replace(/[^a-z0-9&]/g, "");
+  const f = fam.toLowerCase().replace(/[^a-z0-9&]/g, "");
+  if (e === f || e.startsWith(f)) return entity;
+  if (f.startsWith(e)) return fam;
+  return `${entity} (${fam})`;
 }
 
 export function npaNxx(e164: string): { npa: string; nxx: string } | null {

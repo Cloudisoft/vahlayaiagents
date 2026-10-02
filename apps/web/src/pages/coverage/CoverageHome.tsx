@@ -7,6 +7,8 @@ interface LookupResult {
   phoneOriginal: string;
   phoneE164: string;
   predictedCarrier: string | null;
+  carrierEntity?: string | null;
+  carrierNetwork?: string | null;
   lineType: string | null;
   confidence: number | null;
   verificationStatus: string;
@@ -40,7 +42,7 @@ interface BulkJob {
   status: string;
   total: number;
   processed: number;
-  summary: { unique?: number; twilioValidations?: number; costUsd?: number; budgetExceeded?: boolean; bySource?: Record<string, number>; twilioSoFar?: number };
+  summary: { unique?: number; twilioValidations?: number; engineShare?: number; budgetExceeded?: boolean; bySource?: Record<string, number>; twilioSoFar?: number };
   error: string | null;
   created_at: string;
 }
@@ -58,7 +60,7 @@ interface Stats {
   correctPredictions: number;
   incorrectPredictions: number;
   observedAccuracy: number | null;
-  budget: { budgetUsd: number; spentUsd: number; remainingUsd: number };
+  engineShare30d: number | null;
 }
 
 export default function CoverageHome() {
@@ -170,7 +172,7 @@ export default function CoverageHome() {
         ) : (
           <>
             <StatCard label="Lookups answered" value={stats.totalPredictions.toLocaleString()} icon={I.chart} hint={`${stats.verifiedPredictions.toLocaleString()} verified live`} />
-            <StatCard label="Live checks today" value={`$${stats.budget.spentUsd.toFixed(2)}`} icon={I.shield} hint={`of $${stats.budget.budgetUsd.toFixed(2)} daily limit`} />
+            <StatCard label="Answered by Vahlay engine" value={stats.engineShare30d != null ? `${Math.round(stats.engineShare30d * 100)}%` : "—"} icon={I.shield} hint="last 30 days · Twilio only verifies the rest" />
             <StatCard label="Accuracy standard" value="93%+" icon={I.check} tone="text-green-600" hint="less certain answers are marked Not classified" />
           </>
         )}
@@ -223,7 +225,10 @@ export default function CoverageHome() {
                     </div>
                     <div className="rounded-xl bg-slate-50 p-3">
                       <div className="text-xs text-slate-500">Carrier</div>
-                      <div className="text-base font-semibold text-slate-900 truncate">{result.predictedCarrier ?? "Unknown"}</div>
+                      <div className="text-base font-semibold text-slate-900 truncate" title={result.predictedCarrier ?? undefined}>{result.carrierEntity ?? result.predictedCarrier ?? "Unknown"}</div>
+                      {result.carrierEntity && result.carrierNetwork && result.predictedCarrier !== result.carrierEntity && (
+                        <div className="text-[11px] text-slate-500 truncate">part of {result.carrierNetwork.replace(/ \(wireline\)$/, " wireline")}</div>
+                      )}
                     </div>
                     <div className="rounded-xl bg-slate-50 p-3">
                       <div className="text-xs text-slate-500">Confidence</div>
@@ -236,7 +241,7 @@ export default function CoverageHome() {
                       <div>
                         Answered from: <span className="text-slate-700">{SOURCE_LABEL[result.source] ?? result.source}</span>
                         {result.prefixTrust && <> · exchange {result.prefixTrust}</>}
-                        {result.twilioUsed && <> · checked with Twilio</>}
+                        {result.twilioUsed ? <> · verified with Twilio</> : !result.verified && <> · Vahlay engine</>}
                       </div>
                     )}
                     {result.portabilityDetected && <div className="text-amber-700">Ported number — its earlier history said otherwise.</div>}
@@ -291,7 +296,7 @@ export default function CoverageHome() {
           <span className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0"><Icon d={I.upload} size={20} /></span>
           <div>
             <div className="text-sm font-medium text-slate-800">{uploading ? "Uploading…" : "Drop a CSV with a “phone” column here, or click to choose"}</div>
-            <div className="text-xs text-slate-500">Answered from intelligence first; live checks are spent only where they teach the most, within the daily limit. Download the results when it's done.</div>
+            <div className="text-xs text-slate-500">Answered by the Vahlay engine first; Twilio only verifies numbers the engine can't answer at 93%+. Download the results when it's done.</div>
           </div>
           <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadBulk(f); }} />
         </div>
@@ -311,7 +316,7 @@ export default function CoverageHome() {
                     <div className="text-sm font-medium text-slate-800 truncate">{j.file_name ?? "Bulk lookup"}</div>
                     <div className="text-xs text-slate-500">
                       {new Date(j.created_at).toLocaleString()} · {(j.summary?.unique ?? j.total).toLocaleString()} numbers
-                      {j.summary?.twilioValidations != null && <> · {j.summary.twilioValidations} live checks (${(j.summary.costUsd ?? 0).toFixed(2)})</>}
+                      {j.summary?.unique ? <> · {Math.round((j.summary.engineShare ?? (j.summary.unique - (j.summary.twilioValidations ?? 0)) / j.summary.unique) * 100)}% answered by Vahlay engine</> : null}
                     </div>
                     {running && <div className="h-1 mt-1.5 rounded-full bg-slate-100 overflow-hidden max-w-xs"><div className="h-full bg-sky-500 transition-[width]" style={{ width: `${Math.max(4, p)}%` }} /></div>}
                     {j.error && <div className="text-xs text-red-600 mt-0.5">{j.error}</div>}
@@ -338,8 +343,8 @@ interface Intel {
   corrections: { samples: number; accuracy: number | null };
   portability30d: Record<string, number>;
   unknownRate30d: number | null;
-  budgetToday: { limitUsd: number; priceUsd: number; spentUsd: number; remainingLookups: number; twilioLookups: number; localLookups: number };
-  last30d: { spentUsd: number; lookups: number; twilioLookups: number; costPer1000: number | null };
+  today: { lookups: number; engineLookups: number; verifications: number };
+  last30d: { lookups: number; engineLookups: number; verifications: number; engineShare: number | null };
 }
 
 
@@ -347,8 +352,9 @@ interface Intel {
 function IntelligencePanel() {
   const points: Array<[string, string, string]> = [
     [I.chart, "Intelligence first", "Every lookup is answered from numbers we've seen before, what we know about each area code and exchange (NPA-NXX), and the carriers behind them. Recent information counts more than old, because numbers get ported over time."],
-    [I.shield, "Live checks only when needed", "A brand-new number, conflicting history, or an exchange with heavy porting is checked live with Twilio, within a fixed daily limit. Each check improves the answers for every number in that exchange."],
-    [I.upload, "Bulk works the same way", "Files are answered from intelligence first, and live checks are spent only where they teach the most. The confidence on each result is how often answers like it have been right."],
+    [I.shield, "Twilio is the last resort", "Twilio is asked only when the engine can't reach the 93% accuracy standard on its own — a brand-new number, conflicting history, or an exchange with heavy porting. Each verification is written back, so the engine answers that exchange itself next time."],
+    [I.phone, "The real carrier, not just the brand", "Carriers are shown as the licensed company behind the number, with its network: \"New Cingular Wireless PCS (AT&T Wireless)\", \"Pacific Bell (AT&T wireline)\". Download files include both."],
+    [I.upload, "Bulk works the same way", "Files are answered by the Vahlay engine first; Twilio only verifies numbers it can't answer at 93%+, one per uncertain exchange so each check improves the rest. The confidence on each result is how often answers like it have been right."],
     [I.check, "Accuracy comes first", "A line type is only stated when answers like it are right at least 93% of the time, or Twilio verified it. Anything less certain is marked “Not classified” with its best guess beside it."],
   ];
   return (

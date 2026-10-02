@@ -10,7 +10,7 @@ interface DashboardData {
     totalPredictions: number;
     verifiedPredictions: number;
     observedAccuracy: number | null;
-    budget: { budgetUsd: number; spentUsd: number; remainingUsd: number };
+    engineShare30d: number | null;
   };
   leadgen: { leads_discovered: string; leads_enriched: string; valid_leads: string; avg_quality: string | null; lead_lists: string };
   voice: {

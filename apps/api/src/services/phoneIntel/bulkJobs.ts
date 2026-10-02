@@ -20,10 +20,10 @@ export async function saveBulkResults(jobId: string, rows: ResolvedRows) {
   for (let i = 0; i < rows.length; i += BATCH) {
     const part = rows.slice(i, i + BATCH);
     await pool.query(
-      `insert into coverage_bulk_results (job_id, idx, phone_original, phone_e164, line_type, carrier, confidence, source, verified, twilio_used, error, likely_line_type)
-       select $1, i, po, pe, lt, ca, cf, so, ve, tu, er, ll
-       from unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::float8[], $8::text[], $9::bool[], $10::bool[], $11::text[], $12::text[])
-         as u(i, po, pe, lt, ca, cf, so, ve, tu, er, ll)
+      `insert into coverage_bulk_results (job_id, idx, phone_original, phone_e164, line_type, carrier, confidence, source, verified, twilio_used, error, likely_line_type, carrier_entity)
+       select $1, i, po, pe, lt, ca, cf, so, ve, tu, er, ll, ce
+       from unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::float8[], $8::text[], $9::bool[], $10::bool[], $11::text[], $12::text[], $13::text[])
+         as u(i, po, pe, lt, ca, cf, so, ve, tu, er, ll, ce)
        on conflict do nothing`,
       [
         jobId,
@@ -38,6 +38,7 @@ export async function saveBulkResults(jobId: string, rows: ResolvedRows) {
         part.map((r) => r.resolution?.twilioUsed ?? false),
         part.map((r) => r.error),
         part.map((r) => r.resolution?.likelyLineType ?? null),
+        part.map((r) => r.resolution?.carrierEntity ?? null),
       ]
     );
     await pool.query("update coverage_bulk_jobs set processed = $2, locked_at = now() where id = $1", [jobId, Math.min(rows.length, i + BATCH)]);
@@ -94,7 +95,7 @@ export async function processNextBulkJob(): Promise<boolean> {
     await notify(job.organization_id, {
       type: "coverage_bulk_done",
       title: "Bulk lookup finished",
-      body: `${summary.unique.toLocaleString()} numbers · ${summary.twilioValidations} Twilio checks ($${summary.costUsd.toFixed(2)})`,
+      body: `${summary.unique.toLocaleString()} numbers · ${Math.round(summary.engineShare * 100)}% answered by the Vahlay engine`,
       link: "/coverage",
     }).catch(() => undefined);
   } catch (err) {

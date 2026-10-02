@@ -38,6 +38,7 @@ function ctx(over: Partial<any> = {}) {
     npas: new Map(),
     carriers: new Map(),
     calib: new Map(),
+    prefixEntities: new Map(),
     ...over,
   } as any;
 }
@@ -78,7 +79,7 @@ test("conflicting history and drifting prefixes ask for validation", () => {
   assert.equal(verificationReason(r, c1), "conflicting_history");
   const unknown = resolveLocal("+19995550000", ctx());
   assert.equal(unknown.source, "unknown");
-  assert.equal(verificationReason(unknown, ctx()), "new_number");
+  assert.equal(verificationReason(unknown, ctx()), "no_engine_answer");
 });
 
 import { applyTarget } from "../src/services/phoneIntel/engine.js";
@@ -92,4 +93,26 @@ test("precision mode: below-target answers are not classified, guesses kept", ()
   assert.equal(high.lineType, "landline");
   const verified = applyTarget({ ...base, lineType: "voip", confidence: 1, source: "twilio_validated", verified: true }, 0.99);
   assert.equal(verified.lineType, "voip");
+});
+
+test("engine first: a confident answer is never sent to Twilio, whatever its age or prefix", () => {
+  const twoYears = new Date(Date.now() - 2 * 365 * day);
+  const c = ctx({ phones: new Map([["+14078565290", { line_type: "mobile", carrier: "AT&T Wireless", carrier_raw: "New Cingular Wireless PCS, LLC - FL", observed_at: twoYears, conflicts: 0 }]]) });
+  const r = resolveLocal("+14078565290", c);
+  assert.ok(r.confidence >= 0.9);
+  // Old record and no prefix data used to force a Twilio check; now only the target decides.
+  assert.equal(verificationReason(r, c, 0.9), null);
+  assert.equal(verificationReason(r, c, 0.95), "new_prefix");
+  assert.equal(r.carrierEntity, "New Cingular Wireless PCS");
+  assert.equal(r.carrier, "AT&T Wireless");
+});
+
+test("carrier labels keep the licensed company and its network", async () => {
+  const { carrierEntity, carrierLabel, normalizeCarrier } = await import("../src/services/phoneIntel/normalize.js");
+  const label = (raw: string) => carrierLabel(carrierEntity(raw), normalizeCarrier(raw));
+  assert.equal(label("NEW CINGULAR WIRELESS PCS, LLC - GA"), "New Cingular Wireless PCS (AT&T Wireless)");
+  assert.equal(label("Pacific Bell"), "Pacific Bell (AT&T wireline)");
+  assert.equal(label("Cellco Partnership dba Verizon"), "Cellco Partnership dba Verizon (Verizon Wireless)");
+  assert.equal(label("T-Mobile USA, Inc."), "T-Mobile USA");
+  assert.equal(normalizeCarrier("New Cell, Inc. dba Cellcom"), "Cellcom");
 });

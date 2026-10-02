@@ -2,7 +2,7 @@ import { pool } from "../../db/pool.js";
 import { normalizeE164 } from "../../utils/phone.js";
 import { lookupCarrier, ProviderNotConfiguredError } from "../twilioLookupService.js";
 import { commit, release, reserve, budgetState, countLocal } from "./budget.js";
-import { lineTypeFromTwilio, normalizeCarrier, npaNxx, type LineType } from "./normalize.js";
+import { carrierEntity, lineTypeFromTwilio, normalizeCarrier, npaNxx, type LineType } from "./normalize.js";
 import { HALF_LIFE_DAYS, recomputeCarriers, recomputePrefixes, rebuildPhones } from "./recompute.js";
 
 export type Source =
@@ -19,7 +19,8 @@ export interface Resolution {
   phone: string;
   npa: string | null;
   nxx: string | null;
-  carrier: string | null;
+  carrier: string | null; // network family, e.g. "AT&T Wireless"
+  carrierEntity: string | null; // licensed company, e.g. "New Cingular Wireless PCS"
   lineType: LineType;
   confidence: number; // 0..1, a measured probability where calibration exists
   source: Source;
@@ -54,7 +55,8 @@ export function applyTarget(r: Resolution, target: number): Resolution {
   };
 }
 
-// Answers below this go to Twilio when budget allows.
+// Floor for preferring a tier's answer over a more confident lower tier.
+// Twilio is decided by the accuracy target (see verificationReason).
 export const VERIFY_BELOW = 0.85;
 const TWILIO_FRESH_DAYS = 180;
 // A known number's line type changed on re-check only ~0.4% of the time in
@@ -84,11 +86,12 @@ interface Context {
   blocks: Map<string, { dom: LineType; share: number; n: number }>;
   npas: Map<string, { dom: LineType; share: number; n: number }>;
   carriers: Map<string, { dominant_type: LineType; confidence: number }>;
+  prefixEntities: Map<string, string>; // npa+nxx -> most common licensed company of its top carrier
   calib: Map<string, number>; // "signal:bucket" -> accuracy
 }
 
 // One batch load serves 1 or 20,000 numbers alike.
-async function loadContext(e164s: string[]): Promise<Context> {
+export async function loadContext(e164s: string[]): Promise<Context> {
   const pns = e164s.map(npaNxx).filter(Boolean) as Array<{ npa: string; nxx: string }>;
   const npaList = [...new Set(pns.map((p) => p.npa))];
   const blockKeys = [...new Set(pns.map((p) => p.npa + p.nxx.slice(0, 2)))];
@@ -112,6 +115,20 @@ async function loadContext(e164s: string[]): Promise<Context> {
     ),
     pool.query("select signal, bucket, n, correct from intel_calibration where n >= 30"),
   ]);
+  const entities = await pool.query(
+    `select npa || nxx as k, carrier, carrier_raw, count(*)::int as n from phone_intelligence
+     where (npa, nxx) in (select * from unnest($1::text[], $2::text[])) and carrier_raw is not null
+     group by 1, 2, 3`,
+    [pns.map((p) => p.npa), pns.map((p) => p.nxx)]
+  );
+  const topCarrier = new Map(prefixes.rows.map((r) => [r.npa + r.nxx, r.top_carrier]));
+  const prefixEntities = new Map<string, { name: string; n: number }>();
+  for (const r of entities.rows) {
+    if (r.carrier !== topCarrier.get(r.k)) continue;
+    const name = carrierEntity(r.carrier_raw);
+    const cur = prefixEntities.get(r.k);
+    if (name && (!cur || r.n > cur.n)) prefixEntities.set(r.k, { name, n: r.n });
+  }
   const agg = (rows: any[]) =>
     new Map(
       rows.map((r) => {
@@ -130,6 +147,7 @@ async function loadContext(e164s: string[]): Promise<Context> {
     npas: agg(npas.rows),
     carriers: new Map(carriers.rows.map((r) => [r.carrier, { dominant_type: r.dominant_type, confidence: Number(r.confidence) }])),
     calib: new Map(calib.rows.map((r) => [`${r.signal}:${r.bucket}`, r.correct / r.n])),
+    prefixEntities: new Map([...prefixEntities].map(([k, v]) => [k, v.name])),
   };
 }
 
@@ -149,10 +167,12 @@ export function resolveLocal(e164: string, ctx: Context): Resolution {
   const rec = ctx.phones.get(e164);
   const prefix = pn ? ctx.prefixes.get(pn.npa + pn.nxx) ?? null : null;
   const candidates: Resolution[] = [];
+  const recEntity = carrierEntity(rec?.carrier_raw);
+  const prefixEntity = pn ? ctx.prefixEntities.get(pn.npa + pn.nxx) ?? null : null;
 
   // 1. Recent Twilio validation of this number.
   if (rec?.twilio_validated_at && ageDays(rec.twilio_validated_at) <= TWILIO_FRESH_DAYS && rec.line_type !== "unknown") {
-    return { ...base, carrier: rec.carrier, lineType: rec.line_type, confidence: 0.99, source: "twilio_cache", verified: true, prefixTrust: prefix?.trust ?? null, reasons: [`Twilio-validated ${Math.round(ageDays(rec.twilio_validated_at))} day(s) ago`] };
+    return { ...base, carrier: rec.carrier, carrierEntity: recEntity, lineType: rec.line_type, confidence: 0.99, source: "twilio_cache", verified: true, prefixTrust: prefix?.trust ?? null, reasons: [`Twilio-validated ${Math.round(ageDays(rec.twilio_validated_at))} day(s) ago`] };
   }
 
   // 2. A record of this exact number (historical evidence, may be ported since).
@@ -167,7 +187,7 @@ export function resolveLocal(e164: string, ctx: Context): Resolution {
       c *= 0.9;
       reasons.push("Its prefix shows recent porting");
     }
-    candidates.push({ ...base, carrier: rec.carrier, lineType: rec.line_type, confidence: c, source: "phone_record", prefixTrust: prefix?.trust ?? null, reasons });
+    candidates.push({ ...base, carrier: rec.carrier, carrierEntity: recEntity, lineType: rec.line_type, confidence: c, source: "phone_record", prefixTrust: prefix?.trust ?? null, reasons });
   }
 
   // 3. NPA-NXX intelligence.
@@ -175,6 +195,7 @@ export function resolveLocal(e164: string, ctx: Context): Resolution {
     candidates.push({
       ...base,
       carrier: prefix.top_carrier,
+      carrierEntity: prefixEntity,
       lineType: prefix.dominant_type,
       confidence: prefix.confidence,
       source: "prefix_intelligence",
@@ -190,6 +211,7 @@ export function resolveLocal(e164: string, ctx: Context): Resolution {
     candidates.push({
       ...base,
       carrier: carrierName,
+      carrierEntity: recEntity,
       lineType: cs.dominant_type,
       confidence: Math.min(0.95, cs.confidence * (rec ? Math.pow(1 - PHONE_RECORD_ANNUAL_DRIFT, ageDays(rec.observed_at) / 365) : 1)),
       source: "carrier_intelligence",
@@ -201,30 +223,37 @@ export function resolveLocal(e164: string, ctx: Context): Resolution {
   // 5. Neighbouring prefixes, 6. area-code history.
   if (pn) {
     const blk = ctx.blocks.get(pn.npa + pn.nxx.slice(0, 2));
-    if (blk) candidates.push({ ...base, carrier: null, lineType: blk.dom, confidence: areaConfidence(ctx, "neighbor", blk.share, blk.n), source: "neighbor_prefix", prefixTrust: prefix?.trust ?? null, reasons: [`Neighbouring ${pn.npa}-${pn.nxx.slice(0, 2)}x prefixes`] });
+    if (blk) candidates.push({ ...base, carrier: null, carrierEntity: null, lineType: blk.dom, confidence: areaConfidence(ctx, "neighbor", blk.share, blk.n), source: "neighbor_prefix", prefixTrust: prefix?.trust ?? null, reasons: [`Neighbouring ${pn.npa}-${pn.nxx.slice(0, 2)}x prefixes`] });
     const area = ctx.npas.get(pn.npa);
-    if (area) candidates.push({ ...base, carrier: null, lineType: area.dom, confidence: areaConfidence(ctx, "area", area.share, area.n), source: "historical_inference", prefixTrust: prefix?.trust ?? null, reasons: [`Area code ${pn.npa} history`] });
+    if (area) candidates.push({ ...base, carrier: null, carrierEntity: null, lineType: area.dom, confidence: areaConfidence(ctx, "area", area.share, area.n), source: "historical_inference", prefixTrust: prefix?.trust ?? null, reasons: [`Area code ${pn.npa} history`] });
   }
 
   const ordered = candidates.filter((c) => c.confidence > 0);
   const firstStrong = ordered.find((c) => c.confidence >= VERIFY_BELOW);
   const best = firstStrong ?? ordered.sort((a, b) => b.confidence - a.confidence)[0];
-  if (best) return { ...best, carrier: best.carrier ?? rec?.carrier ?? prefix?.top_carrier ?? null };
-  return { ...base, carrier: rec?.carrier ?? null, lineType: "unknown", confidence: 0, source: "unknown", prefixTrust: prefix?.trust ?? null, reasons: ["No evidence for this number or its prefix yet"] };
+  if (best) {
+    if (best.carrier) return best;
+    const fromRec = !!rec?.carrier;
+    return { ...best, carrier: rec?.carrier ?? prefix?.top_carrier ?? null, carrierEntity: fromRec ? recEntity : prefixEntity };
+  }
+  return { ...base, carrier: rec?.carrier ?? null, carrierEntity: recEntity, lineType: "unknown", confidence: 0, source: "unknown", prefixTrust: prefix?.trust ?? null, reasons: ["No evidence for this number or its prefix yet"] };
 }
 
-// Why a local answer deserves a Twilio check.
+// Engine first: Twilio is only asked when the engine can't give an answer
+// that meets the accuracy target. History conflicts, prefix drift and record
+// age already lower the confidence, so they matter only through it. Returns
+// why the engine fell short, or null when its answer stands.
 export function verificationReason(r: Resolution, ctx: Context, target = VERIFY_BELOW): string | null {
   if (r.verified) return null;
+  if (r.source === "unknown") return "no_engine_answer";
+  if (r.confidence >= target) return null;
   const rec = ctx.phones.get(r.phone);
   const prefix = r.npa ? ctx.prefixes.get(r.npa + r.nxx!) : null;
-  if (r.source === "unknown") return "new_number";
-  if (!prefix) return "new_prefix";
   if (rec?.conflicts > 0) return "conflicting_history";
-  if (prefix.trust === "drifting") return "prefix_drifting";
+  if (prefix?.trust === "drifting") return "prefix_drifting";
+  if (!prefix) return "new_prefix";
   if (r.source === "phone_record" && ageDays(rec?.observed_at) > 365) return "stale_record";
-  if (r.confidence < Math.max(VERIFY_BELOW, target)) return "low_confidence";
-  return null;
+  return "below_target";
 }
 
 // Twilio call + write-back into numbers, prefixes and carriers, with
@@ -296,6 +325,7 @@ async function validateWithTwilio(organizationId: string, e164: string, predicte
     npa: pn?.npa ?? null,
     nxx: pn?.nxx ?? null,
     carrier: carrier ?? result.carrierName,
+    carrierEntity: carrierEntity(result.carrierName),
     lineType,
     confidence: 1,
     source: "twilio_validated",
@@ -378,7 +408,7 @@ export interface BulkSummary {
   accuracyTarget: number;
   bySource: Record<string, number>;
   byLineType: Record<string, number>;
-  costUsd: number;
+  engineShare: number; // share of unique numbers answered by the engine alone
 }
 
 // Bulk: resolve everything locally, then spend the limited budget where one
@@ -500,7 +530,7 @@ export async function resolveBulk(
       accuracyTarget: target,
       bySource,
       byLineType,
-      costUsd: twilio * budget.priceUsd,
+      engineShare: unique.length ? (unique.length - twilio) / unique.length : 1,
     },
   };
 }
