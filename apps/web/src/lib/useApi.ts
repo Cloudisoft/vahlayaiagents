@@ -77,7 +77,7 @@ export function useApi<T>(path: string | null, opts: { refreshMs?: number } = {}
   return {
     data: entry?.data as T | undefined,
     error: entry ? null : error,
-    loading: !entry && !error,
+    loading: Boolean(path) && !entry && !error,
     reload,
   };
 }

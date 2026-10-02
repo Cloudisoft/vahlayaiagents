@@ -1,7 +1,8 @@
+import { normalizeE164 } from "../utils/phone.js";
 import { parse } from "csv-parse/sync";
 import ExcelJS from "exceljs";
 import { pool } from "../db/pool.js";
-import { computeQualityScore, normalizeLeadPhone } from "./enrichment.js";
+import { computeQualityScore } from "./enrichment.js";
 
 // Header aliases -> lead column. Anything not listed becomes a custom field
 // (usable in scripts as {{column_name}}).
@@ -107,7 +108,7 @@ export async function readRows(buffer: Buffer, filename: string): Promise<Record
 export async function importLeads(
   org: string,
   records: Record<string, unknown>[],
-  opts: { leadListId: string | null; campaignId: string | null }
+  opts: { leadListId: string | null; campaignId: string | null; source?: string }
 ) {
   const { leadListId, campaignId } = opts;
   let imported = 0;
@@ -119,14 +120,14 @@ export async function importLeads(
 
   for (const [i, raw] of records.entries()) {
     const { fields: f, custom } = mapRow(raw);
-    const phoneE164 = normalizeLeadPhone(f.main_phone ?? null);
+    const phoneE164 = f.main_phone ? normalizeE164(f.main_phone) : null;
     const contactName = [f.first_name, f.last_name].filter(Boolean).join(" ");
     const businessName = f.business_name ?? (contactName || null);
     if (!businessName && !phoneE164) {
       errors.push(`Row ${i + 2}: no name or phone — skipped.`);
       continue;
     }
-    if (f.main_phone && !phoneE164) errors.push(`Row ${i + 2}: "${f.main_phone}" isn't a valid US number — imported without a dialable phone.`);
+    if (f.main_phone && !phoneE164) errors.push(`Row ${i + 2}: "${f.main_phone}" isn't a valid phone number — imported without a dialable phone.`);
     if (phoneE164 && (leadListId || campaignId)) {
       const dup = await pool.query(
         leadListId
@@ -156,7 +157,7 @@ export async function importLeads(
          main_phone, main_phone_e164, business_email, industry, source, quality_score,
          first_name, last_name, contact_title, service_address, current_provider, customer_type,
          lines_count, locations_count, contract_end_date, time_zone, custom_fields, is_dnc, call_status)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'csv_import',$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$27,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
        returning id`,
       [
         org, leadListId, businessName ?? phoneE164, f.address ?? null, f.city ?? null, f.state ?? null, f.zip ?? null,
@@ -164,7 +165,7 @@ export async function importLeads(
         f.first_name ?? null, f.last_name ?? null, f.contact_title ?? null, f.service_address ?? null,
         f.current_provider ?? null, normalizeCustomerType(f.customer_type, f.current_provider),
         parseCount(f.lines_count), parseCount(f.locations_count), parseDate(f.contract_end_date), f.time_zone ?? null,
-        JSON.stringify(custom), isDnc, isDnc ? "DNC" : "NEW",
+        JSON.stringify(custom), isDnc, isDnc ? "DNC" : "NEW", opts.source ?? "csv_import",
       ]
     );
     if (campaignId && phoneE164 && !isDnc) {

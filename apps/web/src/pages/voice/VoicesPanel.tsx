@@ -206,14 +206,14 @@ export default function VoicesPanel() {
       {message && <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-2">{message}</div>}
       {(error || voicesQ.error) && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error || voicesQ.error}</div>}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or ID…" className={`${inputCls} w-64`} />
-        <select value={type} onChange={(e) => setType(e.target.value)} className={`${inputCls} w-auto`}>
+      <div className="grid grid-cols-2 md:grid-cols-[2fr_1fr_1fr_auto_auto] items-center gap-2">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or ID…" className={inputCls} />
+        <select value={type} onChange={(e) => setType(e.target.value)} className={inputCls}>
           <option value="">All types</option>
           <option value="cloned">Cloned only</option>
           <option value="library">Library only</option>
         </select>
-        <select value={gender} onChange={(e) => setGender(e.target.value)} className={`${inputCls} w-auto`}>
+        <select value={gender} onChange={(e) => setGender(e.target.value)} className={inputCls}>
           <option value="">Any gender</option>
           <option value="masc">Male</option>
           <option value="fem">Female</option>
@@ -222,7 +222,7 @@ export default function VoicesPanel() {
         <label className="flex items-center gap-1.5 text-sm text-slate-600">
           <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} /> Show hidden
         </label>
-        <span className="text-xs text-slate-500 ml-auto">
+        <span className="text-xs text-slate-500 text-right">
           {filtered.length} voice(s){filtered.length > shown.length ? ` · showing first ${shown.length}, refine the search` : ""}
         </span>
       </div>
