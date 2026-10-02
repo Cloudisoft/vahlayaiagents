@@ -42,12 +42,20 @@ const PROVIDER_FIELDS: Record<string, { label: string; group: string; fields: { 
     group: "Email",
     fields: [
       { key: "host", label: "Host" },
+      { key: "port", label: "Port (587 or 465)" },
       { key: "user", label: "User" },
       { key: "pass", label: "Password", type: "password" },
       { key: "from", label: "From address" },
     ],
   },
-  resend: { label: "Resend", group: "Email", fields: [{ key: "apiKey", label: "API Key", type: "password" }] },
+  resend: {
+    label: "Resend",
+    group: "Email",
+    fields: [
+      { key: "apiKey", label: "API Key", type: "password" },
+      { key: "from", label: "From address (e.g. Hiring <jobs@yourdomain.com>)" },
+    ],
+  },
   google_places: { label: "Google Places", group: "Lead Sources", fields: [{ key: "apiKey", label: "API Key", type: "password" }] },
   storage: {
     label: "Object Storage (S3-compatible)",

@@ -15,10 +15,9 @@ import { authRouter } from "./routes/auth.js";
 import { orgRouter } from "./routes/org.js";
 import { settingsRouter } from "./routes/settings.js";
 import { filesRouter } from "./routes/files.js";
-import { jobsRouter } from "./routes/jobs.js";
+import { hrRouter } from "./routes/hr.js";
+import { publicHrRouter } from "./routes/publicHr.js";
 import { publicJobsRouter } from "./routes/publicJobs.js";
-import { applicationsRouter } from "./routes/applications.js";
-import { plivoWebhookRouter } from "./routes/webhooks/plivo.js";
 import { vapiWebhookRouter } from "./routes/webhooks/vapi.js";
 import { coverageRouter } from "./routes/coverage.js";
 import { leadgenRouter } from "./routes/leadgen.js";
@@ -62,7 +61,7 @@ app.get("/api/health", (_req, res) => res.json({ status: "ok", timestamp: new Da
 // Plivo posts form-encoded webhook bodies (India HR interviews) — parse
 // before the JSON body parser. VAPI (US Voice AI campaigns) posts JSON, and
 // end-of-call reports can be large.
-app.use("/api/webhooks/plivo", express.urlencoded({ extended: false }), plivoWebhookRouter);
+app.use("/api/public/hr", publicRateLimit, publicHrRouter);
 app.use("/api/webhooks/vapi", express.json({ limit: "10mb" }), vapiWebhookRouter);
 
 app.use(express.json({ limit: "2mb" }));
@@ -71,9 +70,8 @@ app.use("/api/auth", authRateLimit, authRouter);
 app.use("/api/org", orgRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/files", filesRouter);
-app.use("/api/jobs", jobsRouter);
+app.use("/api/hr", hrRouter);
 app.use("/api/public/jobs", publicRateLimit, publicJobsRouter);
-app.use("/api/applications", applicationsRouter);
 app.use("/api/coverage", coverageRouter);
 app.use("/api/leadgen", leadgenRouter);
 app.use("/api/voice/agents", agentsRouter);

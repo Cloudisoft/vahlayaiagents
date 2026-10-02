@@ -12,12 +12,13 @@ const Signup = lazyPage(() => import("./pages/Signup.js"));
 const ForgotPassword = lazyPage(() => import("./pages/ForgotPassword.js"));
 const ResetPassword = lazyPage(() => import("./pages/ResetPassword.js"));
 const ApplyPublic = lazyPage(() => import("./pages/ApplyPublic.js"));
+const InterviewSchedule = lazyPage(() => import("./pages/InterviewSchedule.js"));
 const Dashboard = lazyPage(() => import("./pages/Dashboard.js"));
 const Settings = lazyPage(() => import("./pages/Settings.js"));
 const Usage = lazyPage(() => import("./pages/Usage.js"));
 const Profile = lazyPage(() => import("./pages/Profile.js"));
 const AdminPanel = lazyPage(() => import("./pages/AdminPanel.js"));
-const JobsList = lazyPage(() => import("./pages/hr/JobsList.js"));
+const HrHome = lazyPage(() => import("./pages/hr/HrHome.js"));
 const JobNew = lazyPage(() => import("./pages/hr/JobNew.js"));
 const JobDetail = lazyPage(() => import("./pages/hr/JobDetail.js"));
 const ApplicationDetail = lazyPage(() => import("./pages/hr/ApplicationDetail.js"));
@@ -40,7 +41,7 @@ const AuditorHome = lazyPage(() => import("./pages/auditor/AuditorHome.js"));
 // sign-in, instead of after it.
 const BOOT_CHUNKS: Record<string, () => Promise<unknown>> = {
   "/": () => import("./pages/Dashboard.js"),
-  "/hr": () => import("./pages/hr/JobsList.js"),
+  "/hr": () => import("./pages/hr/HrHome.js"),
   "/coverage": () => import("./pages/coverage/CoverageHome.js"),
   "/leadgen": () => import("./pages/leadgen/LeadGenHome.js"),
   "/settings": () => import("./pages/Settings.js"),
@@ -144,10 +145,11 @@ export default function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/apply/:slug" element={<ApplyPublic />} />
+        <Route path="/interview/:token" element={<InterviewSchedule />} />
 
         <Route element={<AppShell />}>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/hr" element={<JobsList />} />
+          <Route path="/hr" element={<HrHome />} />
           <Route path="/hr/jobs/new" element={<JobNew />} />
           <Route path="/hr/jobs/:id" element={<JobDetail />} />
           <Route path="/hr/applications/:id" element={<ApplicationDetail />} />

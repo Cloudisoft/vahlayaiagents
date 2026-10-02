@@ -1,11 +1,11 @@
 // Worker process bootstrap. Run with `npm run worker --workspace=apps/api`.
 import { isQueueEnabled } from "../services/queue.js";
-import { startResumeWorker } from "./resumeWorker.js";
 import { startCoverageWorker } from "./coverageWorker.js";
 import { startLeadgenWorker } from "./leadgenWorker.js";
 import { startDialer } from "../voiceai/dialer.js";
 import { sweepArtifactsAndReviews } from "../voiceai/callReview.js";
 import { startQcWorker } from "../services/qc/pipeline.js";
+import { startHrWorker } from "../services/hr/worker.js";
 import { processNextBulkJob } from "../services/phoneIntel/bulkJobs.js";
 import { rebuildAll } from "../services/phoneIntel/recompute.js";
 import { pool } from "../db/pool.js";
@@ -16,10 +16,9 @@ if (!isQueueEnabled()) {
       "no jobs will run. This process will stay idle."
   );
 } else {
-  startResumeWorker();
   startCoverageWorker();
   startLeadgenWorker();
-  console.log("[worker] Redis connected. resume-processing, coverage-bulk-lookup, leadgen-discovery and call-audit workers started.");
+  console.log("[worker] Redis connected. coverage-bulk-lookup, leadgen-discovery and call-audit workers started.");
 }
 
 // Voice AI campaign dialer (VAPI). Independent of Redis: it needs only the
@@ -71,3 +70,7 @@ setInterval(async () => {
 
 // QC audits: database-queued (no Redis needed), two at a time.
 startQcWorker(2);
+
+// Vahlay HR: resume screening, approved candidate messages, reminders and
+// AI interview calls (database-queued).
+startHrWorker(3);

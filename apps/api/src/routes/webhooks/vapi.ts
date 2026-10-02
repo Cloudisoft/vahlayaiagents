@@ -13,6 +13,7 @@ import { spokenAgentName } from "../../voiceai/placeholders.js";
 import { AI_OUTCOME_KEYS } from "../../services/dispositionsService.js";
 import { publishEvent } from "../../services/events.js";
 import { notify } from "../../services/notifyService.js";
+import { handleInterviewWebhook } from "../../services/hr/interview.js";
 
 export const vapiWebhookRouter = Router();
 
@@ -53,6 +54,12 @@ vapiWebhookRouter.post("/", async (req: Request, res: Response) => {
   if (!message?.type) return res.status(200).json({});
 
   try {
+    // Vahlay HR interview calls carry their own metadata and never touch campaign calls.
+    if (message.type !== "assistant-request" && (message.call?.metadata?.hrInterviewId || message.call?.assistantOverrides?.metadata?.hrInterviewId)) {
+      const out = await handleInterviewWebhook(message);
+      if (!res.headersSent) res.status(200).json(out ?? {});
+      return;
+    }
     switch (message.type) {
       case "assistant-request":
         return res.json(await handleInbound(message));

@@ -19,10 +19,10 @@ export async function extractText(buffer: Buffer, fileType: string): Promise<str
     return result.value;
   }
   if (ext === "doc") {
-    // Legacy .doc binary format isn't reliably parseable without native
-    // tooling (antiword/catdoc). Surface a real, actionable error instead
-    // of silently returning garbage or fabricated text.
-    throw new Error("Legacy .doc files are not supported for parsing yet — please upload PDF or DOCX.");
+    // Legacy Word binary format, parsed in pure JS.
+    const WordExtractor = ((await import("word-extractor")) as any).default;
+    const doc = await new WordExtractor().extract(buffer);
+    return [doc.getBody(), doc.getFootnotes?.(), doc.getHeaders?.({ includeFooters: true })].filter(Boolean).join("\n");
   }
   if (ext === "txt") {
     return buffer.toString("utf8");

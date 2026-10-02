@@ -6,15 +6,13 @@ import { Readable } from "node:stream";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { getStorageDriver, recordFile } from "../services/storageService.js";
-import { enqueueJob, isQueueEnabled } from "../services/queue.js";
-import { processApplication } from "../services/applicationPipeline.js";
 
 export const publicJobsRouter = Router();
 
 publicJobsRouter.get("/:slug", async (req, res) => {
   const result = await pool.query(
     `select id, title, description, responsibilities, required_skills, preferred_skills, location,
-            employment_type, salary_min, salary_max, screening_questions, organization_id
+            employment_type, salary_min, salary_max, salary_currency, screening_questions, organization_id, department, requirements, published_at, created_at
      from jobs where public_slug = $1 and status = 'published'`,
     [req.params.slug]
   );
@@ -29,7 +27,7 @@ const upload = multer({
   limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    if (![".pdf", ".doc", ".docx", ".txt"].includes(ext)) {
+    if (![".pdf", ".doc", ".docx"].includes(ext)) {
       cb(new Error(`Unsupported resume file type: ${ext}`));
       return;
     }
@@ -102,8 +100,8 @@ publicJobsRouter.post("/:slug/apply", upload.single("resume"), async (req, res) 
     });
 
     const resumeResult = await pool.query<{ id: string }>(
-      "insert into resumes (organization_id, candidate_id, file_id) values ($1,$2,$3) returning id",
-      [job.organization_id, candidateId, fileId]
+      "insert into resumes (organization_id, candidate_id, file_id, file_name) values ($1,$2,$3,$4) returning id",
+      [job.organization_id, candidateId, fileId, req.file.originalname]
     );
 
     let answers: Record<string, unknown> = {};
@@ -116,24 +114,17 @@ publicJobsRouter.post("/:slug/apply", upload.single("resume"), async (req, res) 
     }
 
     const applicationResult = await pool.query<{ id: string }>(
-      `insert into applications (organization_id, job_id, candidate_id, resume_id, cover_letter, answers, status)
-       values ($1,$2,$3,$4,$5,$6,'submitted') returning id`,
+      `insert into applications (organization_id, job_id, candidate_id, resume_id, cover_letter, answers, status, source)
+       values ($1,$2,$3,$4,$5,$6,'submitted','careers_page') returning id`,
       [job.organization_id, job.id, candidateId, resumeResult.rows[0].id, d.coverLetter ?? null, JSON.stringify(answers)]
     );
     const applicationId = applicationResult.rows[0].id;
 
-    if (isQueueEnabled()) {
-      await enqueueJob({
-        queueName: "resume-processing",
-        jobType: "process-application",
-        organizationId: job.organization_id,
-        payload: { applicationId },
-      });
-    } else {
-      // No Redis configured — process inline so the pipeline still runs for
-      // real rather than leaving the application stuck at "submitted".
-      processApplication(applicationId).catch((err) => console.error("Inline application processing failed:", err));
-    }
+    // Screening is picked up by the HR worker; nothing is sent to the candidate automatically.
+    await pool.query(
+      "insert into candidate_activity (organization_id, application_id, kind, title) values ($1,$2,'applied','Applied via careers page')",
+      [job.organization_id, applicationId]
+    );
 
     res.status(201).json({ applicationId, message: "Application submitted." });
   } catch (err: any) {
