@@ -9,18 +9,19 @@ export class ProviderNotConfiguredError extends Error {
   }
 }
 
-async function resolveOpenAiKey(organizationId: string): Promise<string> {
+export async function resolveOpenAiKey(organizationId: string): Promise<string> {
   const cred = await getOrgCredential(organizationId, "openai");
   const key = cred?.apiKey ?? env.openaiApiKey;
   if (!key) throw new ProviderNotConfiguredError("OpenAI");
   return key;
 }
 
-async function recordUsage(organizationId: string, category: string, units: number, costUsd: number, metadata: Record<string, unknown>) {
+// Usage tracking must never break the feature it measures.
+export async function recordUsage(organizationId: string, category: string, units: number, costUsd: number, metadata: Record<string, unknown>) {
   await pool.query(
     `insert into usage (organization_id, category, units, cost_usd, metadata) values ($1, $2, $3, $4, $5)`,
     [organizationId, category, units, costUsd, JSON.stringify(metadata)]
-  );
+  ).catch((err) => console.error("[usage] not recorded:", (err as Error).message));
 }
 
 // Rough GPT-4o-mini pricing for usage tracking ($/1K tokens). Not billed —
@@ -33,6 +34,9 @@ export async function chatJson<T>(params: {
   system: string;
   user: string;
   model?: string;
+  temperature?: number;
+  seed?: number;
+  maxTokens?: number;
 }): Promise<T> {
   const apiKey = await resolveOpenAiKey(params.organizationId);
   const model = params.model ?? "gpt-4o-mini";
@@ -47,7 +51,9 @@ export async function chatJson<T>(params: {
         { role: "user", content: params.user },
       ],
       response_format: { type: "json_object" },
-      temperature: 0.2,
+      temperature: params.temperature ?? 0.2,
+      ...(params.seed !== undefined ? { seed: params.seed } : {}),
+      ...(params.maxTokens ? { max_tokens: params.maxTokens } : {}),
     }),
   });
 
@@ -70,7 +76,9 @@ export async function chatJson<T>(params: {
     });
   }
 
-  return JSON.parse(data.choices[0].message.content) as T;
+  const choice = (data.choices[0] ?? {}) as { message?: { content?: string }; finish_reason?: string };
+  if (choice.finish_reason === "length") throw new Error("The AI response was cut off before it finished (output too long).");
+  return JSON.parse(choice.message?.content ?? "") as T;
 }
 
 export async function transcribeAudio(params: {

@@ -155,6 +155,15 @@ export function withDisclosure(greeting: string, enabled: boolean): string {
   return m ? `${m[1]} ${line} ${m[2]}` : `${greeting} ${line}`;
 }
 
+// The exact voice block sent to VAPI — also used to check a voice at Save.
+export function vapiVoiceConfig(voice: { provider: string; providerVoiceId: string }): Record<string, unknown> {
+  return {
+    provider: voice.provider,
+    voiceId: voice.providerVoiceId,
+    ...(voice.provider === "cartesia" ? { model: "sonic-3", language: "en" } : {}),
+  };
+}
+
 export interface BuiltCall {
   payload: Record<string, any>;
   optionalPaths: string[][];
@@ -366,13 +375,7 @@ export function buildVapiCall(params: {
     metadata: params.metadata,
   };
 
-  if (s.agent.voice) {
-    assistant.voice = {
-      provider: s.agent.voice.provider,
-      voiceId: s.agent.voice.providerVoiceId,
-      ...(s.agent.voice.provider === "cartesia" ? { model: "sonic-3" } : {}),
-    };
-  }
+  if (s.agent.voice) assistant.voice = vapiVoiceConfig(s.agent.voice);
 
   if (params.credentials?.length) assistant.credentials = params.credentials;
 

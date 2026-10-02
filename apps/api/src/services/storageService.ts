@@ -16,6 +16,8 @@ export interface StorageDriver {
   put(key: string, stream: NodeJS.ReadableStream, contentType?: string): Promise<StoredFile>;
   getSignedUrl(key: string, expiresInSeconds?: number): Promise<string>;
   delete(key: string): Promise<void>;
+  // Streams the stored bytes back (server-side only; never exposes the path).
+  open(key: string, range?: { start: number; end: number }): Promise<NodeJS.ReadableStream>;
 }
 
 class LocalDiskDriver implements StorageDriver {
@@ -49,6 +51,12 @@ class LocalDiskDriver implements StorageDriver {
 
   readStream(key: string) {
     return createReadStream(path.join(this.baseDir, key));
+  }
+
+  async open(key: string, range?: { start: number; end: number }): Promise<NodeJS.ReadableStream> {
+    const full = path.join(this.baseDir, key);
+    await stat(full); // throws if missing
+    return createReadStream(full, range ? { start: range.start, end: range.end } : undefined);
   }
 }
 
@@ -99,6 +107,14 @@ class S3CompatibleDriver implements StorageDriver {
 
   async delete(key: string): Promise<void> {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
+
+  async open(key: string, range?: { start: number; end: number }): Promise<NodeJS.ReadableStream> {
+    const r = await this.client.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: key, ...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}) })
+    );
+    if (!r.Body) throw new Error(`Stored object ${key} has no body.`);
+    return r.Body as NodeJS.ReadableStream;
   }
 }
 

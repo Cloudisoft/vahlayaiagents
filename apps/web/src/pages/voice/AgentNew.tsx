@@ -204,7 +204,7 @@ export default function AgentNew() {
             <label className="block text-sm font-medium text-slate-700 mb-1">Voice (Cartesia)</label>
             <select value={form.voiceId} onChange={(e) => set("voiceId", e.target.value)} className={inputCls}>
               <option value="">No voice assigned</option>
-              {voices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+              {voices.map((v) => <option key={v.id} value={v.id}>{(v as { label?: string }).label ?? v.name}</option>)}
             </select>
           </div>
         </div>

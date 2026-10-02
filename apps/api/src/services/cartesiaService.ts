@@ -46,18 +46,27 @@ interface CartesiaVoice {
   is_owner?: boolean;
 }
 
+// "Aadhya - Soother" -> name "Aadhya", style "Soother".
+function splitName(raw: string): { name: string; style: string | null } {
+  const [name, ...rest] = String(raw ?? "").split(" - ");
+  return { name: name.trim() || String(raw), style: rest.join(" - ").trim() || null };
+}
+
+const isEnglish = (lang: string | undefined) => !lang || lang.toLowerCase().startsWith("en");
+
 async function upsertVoice(organizationId: string, v: CartesiaVoice, cloned = false) {
   // Voices the org owns (clones) are private to it; the public library is shared.
   const owned = cloned || Boolean(v.is_owner);
+  const { name, style } = splitName(v.name);
   const r = await pool.query(
     `insert into voices (provider, provider_voice_id, name, language, style, description, gender, organization_id, is_cloned)
-     values ('cartesia', $1, $2, $3, $4, $4, $5, $6, $7)
+     values ('cartesia', $1, $2, $3, coalesce($8, $4), $4, $5, $6, $7)
      on conflict (provider, provider_voice_id) do update set name = excluded.name, language = excluded.language,
        style = excluded.style, description = excluded.description, gender = excluded.gender,
        organization_id = coalesce(excluded.organization_id, voices.organization_id),
        is_cloned = voices.is_cloned or excluded.is_cloned
      returning *`,
-    [v.id, v.name, v.language ?? null, v.description ?? null, v.gender ?? null, owned ? organizationId : null, owned]
+    [v.id, name, v.language ?? null, v.description ?? null, v.gender ?? null, owned ? organizationId : null, owned, style]
   );
   return r.rows[0];
 }
@@ -65,6 +74,13 @@ async function upsertVoice(organizationId: string, v: CartesiaVoice, cloned = fa
 // The real Cartesia catalog (public voices plus the org's own clones),
 // paged through completely. Never returns a fabricated list.
 export async function syncCartesiaVoices(organizationId: string): Promise<number> {
+  // Old non-English library voices nothing uses are dropped on every sync.
+  await pool.query(
+    `delete from voices where organization_id is null and coalesce(language, 'en') not like 'en%'
+       and not exists (select 1 from ai_agents a where a.voice_id = voices.id)
+       and not exists (select 1 from campaigns c where c.voice_id = voices.id)
+       and not exists (select 1 from calls k where k.voice_id = voices.id)`
+  );
   const apiKey = await resolveCartesiaKey(organizationId);
   let after: string | null = null;
   let count = 0;
@@ -72,7 +88,9 @@ export async function syncCartesiaVoices(organizationId: string): Promise<number
     const q = new URLSearchParams({ limit: "100" });
     if (after) q.set("starting_after", after);
     const r = await cartesia<{ data: CartesiaVoice[]; has_more: boolean; next_page?: string | null }>(apiKey, `/voices?${q}`);
+    // The library keeps English voices only; the org's own clones are always kept.
     for (const v of r.data) {
+      if (!isEnglish(v.language) && !v.is_owner) continue;
       await upsertVoice(organizationId, v);
       count++;
     }

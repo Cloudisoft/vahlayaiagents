@@ -283,41 +283,24 @@ function IntelligencePanel() {
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="font-medium text-slate-900">Phone intelligence</h2>
-        <span className="text-xs text-slate-500">
-          Twilio today: ${d.budgetToday.spentUsd.toFixed(2)} of ${d.budgetToday.limitUsd.toFixed(2)} · {d.budgetToday.remainingLookups} checks left at ${d.budgetToday.priceUsd}/lookup
-        </span>
+        <h2 className="font-medium text-slate-900">How phone intelligence works</h2>
+
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-        <Mini label="Known numbers" value={d.totals.numbers.toLocaleString()} hint={`${d.totals.observations.toLocaleString()} observations`} />
-        <Mini label="NPA-NXX prefixes" value={d.totals.prefixes.toLocaleString()} hint={`${trust.trusted?.n ?? 0} trusted · ${trust.probable?.n ?? 0} probable · ${trust.drifting?.n ?? 0} drifting`} />
-        <Mini label="Twilio-verified numbers" value={d.totals.twilio_verified_numbers.toLocaleString()} />
-        <Mini label="Cost per 1,000 lookups (30d)" value={d.last30d.costPer1000 == null ? "—" : `$${d.last30d.costPer1000.toFixed(2)}`} hint={`${d.last30d.lookups.toLocaleString()} lookups`} />
-      </div>
-      <div className="grid md:grid-cols-3 gap-3 text-sm">
-        <div className="rounded-lg border border-slate-200 p-3">
-          <div className="text-xs text-slate-500">Live audit accuracy (30d)</div>
-          <div className="text-xl font-semibold">{pct(d.audit.accuracy)}</div>
-          <div className="text-xs text-slate-500">
-            {d.audit.samples} random Twilio checks of confident answers
-            {Object.entries(d.audit.byType).map(([t, v]) => ` · ${t} ${pct(v.accuracy)}`).join("")}
-          </div>
-        </div>
-        <div className="rounded-lg border border-slate-200 p-3">
-          <div className="text-xs text-slate-500">Holdout backtest (new numbers, prefix only)</div>
-          <div className="text-xl font-semibold">{pct(holdAcc)}</div>
-          <div className="text-xs text-slate-500">
-            {d.holdout ? `${d.holdout.evaluated.toLocaleString()} held-out numbers` : "Runs after an import"}
-            {d.holdout && Object.entries(d.holdout.by_type).map(([t, v]) => ` · ${t} ${pct(v.correct / Math.max(1, v.n))}`).join("")}
-          </div>
-        </div>
-        <div className="rounded-lg border border-slate-200 p-3">
-          <div className="text-xs text-slate-500">Twilio corrections (30d)</div>
-          <div className="text-xl font-semibold">{d.corrections.samples}</div>
-          <div className="text-xs text-slate-500">
-            Uncertain answers checked; local guess was right {pct(d.corrections.accuracy)} of the time · ported {d.portability30d.line_type_change ?? 0} · unknown rate {pct(d.unknownRate30d)}
-          </div>
-        </div>
+      <div className="text-sm text-slate-600 leading-relaxed space-y-2">
+        <p>
+          Every lookup is answered first from Vahlay's own phone intelligence: numbers we have seen before, what we know about each
+          area code and exchange (NPA-NXX), and the carriers behind them. Older information counts for less than recent information,
+          because numbers get ported between carriers and line types over time.
+        </p>
+        <p>
+          When the answer isn't certain — a brand-new number, conflicting history, or an exchange where numbers are being ported — the
+          number is checked live with Twilio, within a fixed daily limit. Each live check is saved and improves the answers for every
+          other number in the same exchange, so the system gets more accurate the more it is used.
+        </p>
+        <p>
+          Bulk files work the same way: numbers are answered from intelligence first, and live checks are spent only where they teach
+          the most. The confidence shown with each result is how often answers like it have been right.
+        </p>
       </div>
       {isAdmin && (
         <div className="flex flex-wrap items-center gap-2 text-sm">

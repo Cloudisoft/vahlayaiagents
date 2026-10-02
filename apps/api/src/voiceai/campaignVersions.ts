@@ -1,5 +1,7 @@
 import { pool, withTransaction } from "../db/pool.js";
-import type { CampaignSnapshot } from "./assistantBuilder.js";
+import { checkVapiVoice } from "./vapiClient.js";
+import { voiceCredentials } from "../services/cartesiaService.js";
+import { vapiVoiceConfig, type CampaignSnapshot } from "./assistantBuilder.js";
 import { cleanIntroName } from "./placeholders.js";
 
 export class PublishError extends Error {}
@@ -71,7 +73,19 @@ export async function publishCampaign(campaignId: string, organizationId: string
   if (/REPLACE THE FIGURES/.test(snapshot.knowledgeText)) {
     warnings.push("The knowledge base still has the template's example offer figures. Replace them with your approved offers — the agent quotes only what's there.");
   }
-  if (!snapshot.agent.voice) warnings.push("The agent has no voice assigned; VAPI's default voice will be used.");
+  if (!snapshot.agent.voice) {
+    warnings.push("No voice is selected for this campaign or its agent; VAPI's default voice will be used.");
+  } else {
+    // The chosen voice is exactly what every call will use, so VAPI must
+    // accept it now — a bad voice would otherwise fail every call.
+    try {
+      const check = await checkVapiVoice(organizationId, vapiVoiceConfig(snapshot.agent.voice), await voiceCredentials(organizationId, snapshot.agent.voice));
+      if (!check.ok) throw new PublishError(`VAPI can't use the voice "${snapshot.agent.voice.name}": ${check.error}. Pick another voice and save again.`);
+    } catch (err) {
+      if (err instanceof PublishError) throw err;
+      warnings.push(`The voice couldn't be checked with VAPI right now (${(err as Error).message.slice(0, 120)}). Saved anyway.`);
+    }
+  }
 
   return withTransaction(async (client) => {
     const next = await client.query<{ v: number }>(

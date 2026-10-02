@@ -234,3 +234,34 @@ export async function vapiModelCatalog(): Promise<ModelCatalog> {
   catalogCache = { at: Date.now(), value };
   return value;
 }
+
+export async function deleteVapiAssistant(organizationId: string, id: string): Promise<void> {
+  await request(await resolveVapiKey(organizationId), "DELETE", `/assistant/${id}`);
+}
+
+// Asks VAPI to accept this exact voice config (as calls will send it) by
+// creating and deleting a throwaway assistant, so a voice VAPI can't use is
+// caught at Save rather than failing every call.
+export async function checkVapiVoice(organizationId: string, voice: Record<string, unknown>, credentials?: Array<Record<string, string>>): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const a = await createVapiAssistant(organizationId, {
+      name: "vahlay-voice-check",
+      voice,
+      ...(credentials?.length ? { credentials } : {}),
+    });
+    await deleteVapiAssistant(organizationId, a.id).catch(() => undefined);
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof VapiApiError && err.status >= 400 && err.status < 500) {
+      let msg = err.body;
+      try {
+        const j = JSON.parse(err.body);
+        msg = Array.isArray(j.message) ? j.message.join("; ") : j.message ?? err.body;
+      } catch {
+        // plain text
+      }
+      return { ok: false, error: String(msg).slice(0, 300) };
+    }
+    throw err;
+  }
+}

@@ -360,7 +360,7 @@ export default function CampaignDetail() {
               <Field label="Voice override" hint="Leave empty to use the agent's voice.">
                 <select value={value("voiceId") ?? ""} onChange={(e) => set("voiceId", e.target.value || null)} className={inputCls}>
                   <option value="">Agent's voice</option>
-                  {voices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                  {voices.map((v) => <option key={v.id} value={v.id}>{(v as { label?: string }).label ?? v.name}</option>)}
                 </select>
               </Field>
               <Field label="Callback number" hint="Read out when a lead asks how to reach you.">

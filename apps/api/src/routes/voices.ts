@@ -35,7 +35,12 @@ const upload = multer({
 voicesRouter.get("/", async (req: AuthedRequest, res) => {
   const result = await pool.query(
     `select id, provider, provider_voice_id, name, language, gender, description, is_cloned, hidden,
-            (organization_id is not null) as owned
+            (organization_id is not null) as owned,
+            -- Pickers show the plain name; repeated names get a short qualifier.
+            case when count(*) over (partition by lower(name)) > 1
+                 then name || ' · ' || case gender when 'masculine' then 'Male' when 'feminine' then 'Female' when 'gender_neutral' then 'Neutral' else 'Voice' end
+                   || ' ' || right(provider_voice_id, 4)
+                 else name end as label
      from voices
      where (organization_id is null or organization_id = $1) and ($2::boolean or not hidden)
      order by is_cloned desc, provider, name`,

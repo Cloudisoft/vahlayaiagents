@@ -3,9 +3,9 @@ import { isQueueEnabled } from "../services/queue.js";
 import { startResumeWorker } from "./resumeWorker.js";
 import { startCoverageWorker } from "./coverageWorker.js";
 import { startLeadgenWorker } from "./leadgenWorker.js";
-import { startAuditorWorker } from "./auditorWorker.js";
 import { startDialer } from "../voiceai/dialer.js";
 import { sweepArtifactsAndReviews } from "../voiceai/callReview.js";
+import { startQcWorker } from "../services/qc/pipeline.js";
 import { processNextBulkJob } from "../services/phoneIntel/bulkJobs.js";
 import { rebuildAll } from "../services/phoneIntel/recompute.js";
 import { pool } from "../db/pool.js";
@@ -19,7 +19,6 @@ if (!isQueueEnabled()) {
   startResumeWorker();
   startCoverageWorker();
   startLeadgenWorker();
-  startAuditorWorker();
   console.log("[worker] Redis connected. resume-processing, coverage-bulk-lookup, leadgen-discovery and call-audit workers started.");
 }
 
@@ -69,3 +68,6 @@ setInterval(async () => {
     c.release();
   }
 }, 15 * 60_000);
+
+// QC audits: database-queued (no Redis needed), two at a time.
+startQcWorker(2);
