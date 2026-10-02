@@ -13,6 +13,55 @@ export async function createBulkJob(organizationId: string, userId: string, file
   return r.rows[0].id;
 }
 
+type ResolvedRows = Awaited<ReturnType<typeof resolveBulk>>["rows"];
+
+export async function saveBulkResults(jobId: string, rows: ResolvedRows) {
+  const BATCH = 2000;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const part = rows.slice(i, i + BATCH);
+    await pool.query(
+      `insert into coverage_bulk_results (job_id, idx, phone_original, phone_e164, line_type, carrier, confidence, source, verified, twilio_used, error, likely_line_type)
+       select $1, i, po, pe, lt, ca, cf, so, ve, tu, er, ll
+       from unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::float8[], $8::text[], $9::bool[], $10::bool[], $11::text[], $12::text[])
+         as u(i, po, pe, lt, ca, cf, so, ve, tu, er, ll)
+       on conflict do nothing`,
+      [
+        jobId,
+        part.map((_, k) => i + k),
+        part.map((r) => r.input),
+        part.map((r) => r.e164),
+        part.map((r) => r.resolution?.lineType ?? null),
+        part.map((r) => r.resolution?.carrier ?? null),
+        part.map((r) => r.resolution?.confidence ?? null),
+        part.map((r) => r.resolution?.source ?? null),
+        part.map((r) => r.resolution?.verified ?? false),
+        part.map((r) => r.resolution?.twilioUsed ?? false),
+        part.map((r) => r.error),
+        part.map((r) => r.resolution?.likelyLineType ?? null),
+      ]
+    );
+    await pool.query("update coverage_bulk_jobs set processed = $2, locked_at = now() where id = $1", [jobId, Math.min(rows.length, i + BATCH)]);
+  }
+}
+
+// Small batches are answered inline; they're still saved as a finished job so
+// the results show in the list and can be downloaded like any other.
+export async function createCompletedBulkJob(
+  organizationId: string,
+  userId: string,
+  fileName: string,
+  rows: ResolvedRows,
+  summary: unknown
+) {
+  const r = await pool.query<{ id: string }>(
+    `insert into coverage_bulk_jobs (organization_id, requested_by, file_name, phones, total, processed, status, summary, finished_at)
+     values ($1,$2,$3,'{}',$4,$4,'completed',$5,now()) returning id`,
+    [organizationId, userId, fileName, rows.length, JSON.stringify(summary)]
+  );
+  await saveBulkResults(r.rows[0].id, rows);
+  return r.rows[0].id;
+}
+
 // Claims one queued job (or one abandoned for 15+ minutes) so two workers
 // never process the same file.
 export async function processNextBulkJob(): Promise<boolean> {
@@ -29,32 +78,7 @@ export async function processNextBulkJob(): Promise<boolean> {
     const { rows, summary } = await resolveBulk(job.organization_id, job.phones, async (n) => {
       await pool.query("update coverage_bulk_jobs set locked_at = now(), summary = summary || $2 where id = $1", [job.id, JSON.stringify({ twilioSoFar: n })]);
     });
-    const BATCH = 2000;
-    for (let i = 0; i < rows.length; i += BATCH) {
-      const part = rows.slice(i, i + BATCH);
-      await pool.query(
-        `insert into coverage_bulk_results (job_id, idx, phone_original, phone_e164, line_type, carrier, confidence, source, verified, twilio_used, error, likely_line_type)
-         select $1, i, po, pe, lt, ca, cf, so, ve, tu, er, ll
-         from unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::float8[], $8::text[], $9::bool[], $10::bool[], $11::text[], $12::text[])
-           as u(i, po, pe, lt, ca, cf, so, ve, tu, er, ll)
-         on conflict do nothing`,
-        [
-          job.id,
-          part.map((_, k) => i + k),
-          part.map((r) => r.input),
-          part.map((r) => r.e164),
-          part.map((r) => r.resolution?.lineType ?? null),
-          part.map((r) => r.resolution?.carrier ?? null),
-          part.map((r) => r.resolution?.confidence ?? null),
-          part.map((r) => r.resolution?.source ?? null),
-          part.map((r) => r.resolution?.verified ?? false),
-          part.map((r) => r.resolution?.twilioUsed ?? false),
-          part.map((r) => r.error),
-          part.map((r) => r.resolution?.likelyLineType ?? null),
-        ]
-      );
-      await pool.query("update coverage_bulk_jobs set processed = $2, locked_at = now() where id = $1", [job.id, Math.min(rows.length, i + BATCH)]);
-    }
+    await saveBulkResults(job.id, rows);
     // Keep the lookup history the Coverage page lists (unique numbers only).
     const seen = new Set<string>();
     for (const r of rows) {

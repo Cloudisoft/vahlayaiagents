@@ -72,6 +72,8 @@ export default function CoverageHome() {
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [drag, setDrag] = useState(false);
+  const [bulkMode, setBulkMode] = useState<"file" | "paste">("file");
+  const [pasted, setPasted] = useState("");
 
   async function loadJobs() {
     const r = await api<{ jobs: BulkJob[] }>("/coverage/lookup/bulk");
@@ -126,11 +128,14 @@ export default function CoverageHome() {
     }
   }
 
-  async function uploadBulk(file: File) {
+  const pastedCount = pasted.split(/[\r\n,;\t]+/).filter((p) => /\d/.test(p)).length;
+
+  async function uploadBulk(input: File | string) {
     setBulkMessage(null);
     setError(null);
     const form = new FormData();
-    form.append("file", file);
+    if (typeof input === "string") form.append("numbers", input);
+    else form.append("file", input);
     setUploading(true);
     try {
       const res = await authedFetch("/api/coverage/lookup/bulk", { method: "POST", body: form });
@@ -138,6 +143,7 @@ export default function CoverageHome() {
       if (!res.ok) throw new Error(data.error);
       setBulkMessage(data.message);
       if (fileRef.current) fileRef.current.value = "";
+      if (typeof input === "string") setPasted("");
       await Promise.all([loadStats(), loadJobs()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bulk upload failed.");
@@ -245,7 +251,36 @@ export default function CoverageHome() {
         <IntelligencePanel />
       </div>
 
-      <Card title="Bulk lookup" action={<span className="text-xs text-slate-400">CSV with a “phone” column · up to 20,000 numbers</span>}>
+      <Card
+        title="Bulk lookup"
+        action={
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-400 hidden sm:inline">up to 20,000 numbers</span>
+            <div className="inline-flex rounded-lg border border-slate-200 p-0.5 text-xs">
+              {(["file", "paste"] as const).map((m) => (
+                <button key={m} onClick={() => setBulkMode(m)} className={`px-2.5 py-1 rounded-md ${bulkMode === m ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900"}`}>
+                  {m === "file" ? "Upload CSV" : "Paste numbers"}
+                </button>
+              ))}
+            </div>
+          </div>
+        }
+      >
+        {bulkMode === "paste" ? (
+          <div className="space-y-2">
+            <textarea
+              value={pasted}
+              onChange={(e) => setPasted(e.target.value)}
+              rows={7}
+              placeholder={"Paste phone numbers, one per line\n(501) 501-8711\n+1 805 380 3380\n6566664534"}
+              className={`${inputCls} font-mono text-sm`}
+            />
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-slate-500">{pastedCount ? `${pastedCount.toLocaleString()} number${pastedCount === 1 ? "" : "s"}` : "One per line, or separated by commas. Any format works."}</span>
+              <Btn kind="primary" onClick={() => uploadBulk(pasted)} disabled={!pastedCount || uploading}>{uploading ? "Looking up…" : "Look up numbers"}</Btn>
+            </div>
+          </div>
+        ) : (
         <div
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
@@ -255,11 +290,12 @@ export default function CoverageHome() {
         >
           <span className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0"><Icon d={I.upload} size={20} /></span>
           <div>
-            <div className="text-sm font-medium text-slate-800">{uploading ? "Uploading…" : "Drop a CSV here or click to choose"}</div>
+            <div className="text-sm font-medium text-slate-800">{uploading ? "Uploading…" : "Drop a CSV with a “phone” column here, or click to choose"}</div>
             <div className="text-xs text-slate-500">Answered from intelligence first; live checks are spent only where they teach the most, within the daily limit. Download the results when it's done.</div>
           </div>
           <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadBulk(f); }} />
         </div>
+        )}
         {bulkMessage && <div className="mt-3"><Banner kind="ok" onClose={() => setBulkMessage(null)}>{bulkMessage}</Banner></div>}
         {jobs.length > 0 && (
           <ul className="mt-4 divide-y divide-slate-100">

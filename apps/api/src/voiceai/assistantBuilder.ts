@@ -1,5 +1,5 @@
 import { AI_OUTCOME_KEYS, AI_OUTCOMES } from "../services/dispositionsService.js";
-import { cleanIntroName, leadTemplateVars, renderTemplate, spokenAgentName } from "./placeholders.js";
+import { callerName, cleanIntroName, leadTemplateVars, renderTemplate } from "./placeholders.js";
 import { vapiServerUrl, vapiWebhookSecret } from "./vapiClient.js";
 
 // Frozen at "Save & publish" (playbook §4). The dialer only ever builds
@@ -82,7 +82,9 @@ export function platformRules(vars: { agentName: string; introName: string; call
 - Before you close any call where they're still talking to you, capture and save: the best day and time to reach them, an alternate phone number, their email (spell it back letter by letter to confirm), and when they're available for a follow-up or installation. Save each one with save_lead_details as soon as you hear it.
 - Before ending or transferring, record the result with set_call_outcome. Book any agreed callback with book_callback.
 - Only transfer when the caller agrees: say "Let me connect you now" and use the transfer tool.
-- When the conversation is done (goodbye, not interested, wrong number, callback booked), say a short goodbye and end the call right away.${
+- Never end the call early. While the caller is still talking, asking questions or unsure, keep the conversation going: answer their question, explain the value in a sentence or two, and ask your next question. An unclear or one-word answer means ask a short clarifying question, never hang up.
+- End the call only when: they say goodbye; they clearly decline twice; they ask not to be called; it's a wrong number; a callback is booked or the transfer is done; or, after you've asked to clarify, they confirm there's no business involved.
+- When the conversation is done, say a short goodbye and end the call right away.${
     vars.callbackNumber ? `\n- If asked for a callback number, give ${vars.callbackNumber}, read digit by digit.` : ""
   }`;
 }
@@ -181,7 +183,7 @@ export function buildVapiCall(params: {
   credentials?: Array<Record<string, string>>;
 }): BuiltCall {
   const { snapshot: s, lead } = params;
-  const agentName = spokenAgentName(s.agent.voice?.name) || spokenAgentName(s.agent.name);
+  const agentName = callerName(s.agent.name, s.agent.voice?.name);
   const introName = cleanIntroName(s.introName);
   const vars = leadTemplateVars({ lead, agentName, introName, callbackNumber: s.callbackNumber });
   const localTime = new Intl.DateTimeFormat("en-US", {

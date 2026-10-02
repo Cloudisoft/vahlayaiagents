@@ -250,7 +250,7 @@ export default function VoicesPanel() {
         </div>
       )}
 
-      <p className="text-xs text-slate-500">The agent says only the first part of the voice name: "Ray - Conversationalist" introduces itself as Ray.</p>
+      <p className="text-xs text-slate-500">A voice sets how the agent sounds. On calls the agent introduces itself with the AI agent's name, not the voice name.</p>
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase">

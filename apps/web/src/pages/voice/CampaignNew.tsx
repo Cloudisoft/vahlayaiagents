@@ -88,9 +88,9 @@ export default function CampaignNew() {
           </select>
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Intro name</label>
-          <input value={introName} onChange={(e) => setIntroName(e.target.value)} className={inputCls} placeholder="Who the agent says it's calling for" />
-          <p className="text-xs text-slate-500 mt-1">Spoken as "this is Ray with <em>intro name</em>". You can change everything else on the next screen.</p>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Company name (intro)</label>
+          <input value={introName} onChange={(e) => setIntroName(e.target.value)} className={inputCls} placeholder="Spectrum Business" />
+          <p className="text-xs text-slate-500 mt-1">The company the agent calls from: "this is <em>agent name</em> with <em>Spectrum Business</em>". Put the company here, not the agent's name. You can change everything else on the next screen.</p>
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Calling numbers</label>

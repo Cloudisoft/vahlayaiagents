@@ -359,7 +359,7 @@ export default function CampaignDetail() {
                 </select>
                 {value("aiAgentId") && <Link to={`/voice/agents/${value("aiAgentId")}`} className="text-xs text-red-600 hover:underline">Edit agent →</Link>}
               </Field>
-              <Field label="Intro name" hint={'Spoken as "this is Ray with …". Use exactly how you\'re allowed to identify yourselves (e.g. "an authorized Spectrum Business reseller").'}>
+              <Field label="Company name (intro)" hint={'The company the agent calls from: "this is <agent name> with Spectrum Business". Put the company here, not the agent\'s name (that comes from the AI agent).'}>
                 <input value={value("introName") ?? ""} onChange={(e) => set("introName", e.target.value)} className={inputCls} />
               </Field>
               <Field label="Voice override" hint="Leave empty to use the agent's voice.">

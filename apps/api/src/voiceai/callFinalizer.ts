@@ -6,7 +6,7 @@ import { DNC_CODES, ensureDefaultDispositions } from "../services/dispositionsSe
 import { publishEvent, signalSlotFreed } from "../services/events.js";
 import { getStorageDriver, recordFile } from "../services/storageService.js";
 import { normalizeCallRecording } from "../services/audioProcessingService.js";
-import { spokenAgentName } from "./placeholders.js";
+import { callerName } from "./placeholders.js";
 
 export interface CallReport {
   endedReason: string | null;
@@ -70,12 +70,13 @@ export async function finalizeCall(callId: string, report: CallReport | null, op
   const r = await pool.query(
     `select c.*, cmp.max_attempts, cmp.retry_delay_minutes, cmp.retry_on_voicemail,
             cl.id as campaign_lead_id, cl.attempts as lead_attempts,
-            cd.key as existing_disposition_key, v.name as voice_name
+            cd.key as existing_disposition_key, v.name as voice_name, ag.name as agent_name
      from calls c
      left join campaigns cmp on cmp.id = c.campaign_id
      left join campaign_leads cl on cl.last_call_id = c.id
      left join call_dispositions cd on cd.id = c.disposition_id
      left join voices v on v.id = c.voice_id
+     left join ai_agents ag on ag.id = c.agent_id
      where c.id = $1`,
     [callId]
   );
@@ -190,7 +191,7 @@ export async function finalizeCall(callId: string, report: CallReport | null, op
 }
 
 async function storeArtifacts(call: any, report: CallReport) {
-  const speaker = spokenAgentName(call.voice_name) || "Agent";
+  const speaker = callerName(call.agent_name, call.voice_name) || "Agent";
   if (report.messages.length > 0) {
     const turns = report.messages.map((m) => ({
       speaker: m.role === "assistant" ? speaker : "Customer",

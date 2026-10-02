@@ -185,7 +185,8 @@ export default function AgentNew() {
       <form onSubmit={onSubmit} className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
-          <input required value={form.name} onChange={(e) => set("name", e.target.value)} className={inputCls} />
+          <input required value={form.name} onChange={(e) => set("name", e.target.value)} className={inputCls} placeholder="Ray — Spectrum Business" />
+          <p className="text-xs text-slate-500 mt-1">The agent says the name before the dash on calls ("Ray — Spectrum Business" introduces itself as Ray), whatever voice it uses. A name without a person's name (e.g. "Spectrum Business Outbound") uses the voice's name instead.</p>
         </div>
         <div className="grid grid-cols-3 gap-4">
           <div>

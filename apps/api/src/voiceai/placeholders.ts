@@ -65,6 +65,16 @@ export function spokenAgentName(voiceName: string | null | undefined): string {
   return voiceName.split(/\s[-–—|(]\s?|\(/)[0].trim();
 }
 
+// The name the agent says on calls comes from the AI agent: "Ray — Spectrum
+// Business" or "Ray" says Ray. A descriptive agent name with no person's name
+// ("Spectrum Business Outbound") falls back to the voice's name.
+export function callerName(agentName: string | null | undefined, voiceName?: string | null): string {
+  const full = (agentName ?? "").trim();
+  const head = spokenAgentName(full);
+  const named = head && (head !== full || !/\s/.test(head)) && head.split(/\s+/).length <= 2;
+  return (named ? head : "") || spokenAgentName(voiceName) || head;
+}
+
 // Campaign intro names often carry copy markers from duplication
 // ("MVA copy", "Spectrum (2)") — strip them so they're never spoken.
 export function cleanIntroName(name: string | null | undefined): string {

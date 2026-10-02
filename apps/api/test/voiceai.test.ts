@@ -202,3 +202,12 @@ test("escalation matrix transfer destinations and recording disclosure", () => {
   );
   assert.equal(withDisclosure("Hello there", false), "Hello there");
 });
+
+test("calls use the AI agent's name; the voice name is only a fallback", async () => {
+  const { callerName } = await import("../src/voiceai/placeholders.js");
+  assert.equal(callerName("Ray — Spectrum Business", "Hari - Sales"), "Ray");
+  assert.equal(callerName("Ray", "Hari"), "Ray");
+  assert.equal(callerName("Mary Ann - Sales", "Ray"), "Mary Ann");
+  assert.equal(callerName("Spectrum Business Outbound", "Ray - Conversationalist"), "Ray");
+  assert.equal(callerName("", "Ray - Conversationalist"), "Ray");
+});

@@ -8,7 +8,7 @@ import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { stringify } from "csv-stringify/sync";
 import { getCoverageStats, lookupPhone, recordLookup, toLookupResult } from "../services/coverageService.js";
 import { resolveBulk } from "../services/phoneIntel/engine.js";
-import { createBulkJob, MAX_BULK } from "../services/phoneIntel/bulkJobs.js";
+import { createBulkJob, createCompletedBulkJob, MAX_BULK } from "../services/phoneIntel/bulkJobs.js";
 import { AlreadyImportedError, startHistoricalImport } from "../services/phoneIntel/importer.js";
 import { budgetState, HARD_DAILY_CAP_USD } from "../services/phoneIntel/budget.js";
 import { requireRole } from "../middleware/rbac.js";
@@ -66,28 +66,45 @@ function phonesFromCsv(buffer: Buffer): string[] {
   return records.map((r) => r.phone ?? r.phone_number ?? r.number ?? r.mobile ?? "").filter(Boolean);
 }
 
+// Pasted numbers: one per line, or separated by commas, semicolons or tabs.
+// Spaces stay, so "(501) 501-8711" is one number. A "phone" header is ignored.
+export function phonesFromText(text: string): string[] {
+  return text
+    .split(/[\r\n,;\t]+/)
+    .map((p) => p.trim())
+    .filter((p) => p && /\d/.test(p));
+}
+
 // Bulk lookup (up to 20,000 numbers). Small files are answered inline; larger
 // ones become a job the worker processes, polled via /lookup/bulk/:id.
 coverageRouter.post("/lookup/bulk", upload.single("file"), async (req: AuthedRequest, res) => {
-  if (!req.file) return res.status(400).json({ error: "No CSV file provided." });
+  const pasted = typeof req.body?.numbers === "string" ? req.body.numbers : null;
+  if (!req.file && !pasted?.trim()) return res.status(400).json({ error: "Upload a CSV or paste some phone numbers." });
   let phones: string[];
-  try {
-    phones = phonesFromCsv(req.file.buffer);
-  } catch (err) {
-    return res.status(400).json({ error: `Invalid CSV: ${(err as Error).message}` });
+  if (req.file) {
+    try {
+      phones = phonesFromCsv(req.file.buffer);
+    } catch (err) {
+      return res.status(400).json({ error: `Invalid CSV: ${(err as Error).message}` });
+    }
+    if (phones.length === 0) return res.status(400).json({ error: "CSV must have a 'phone' column." });
+  } else {
+    phones = phonesFromText(pasted!);
+    if (phones.length === 0) return res.status(400).json({ error: "No phone numbers found. Paste one number per line." });
   }
-  if (phones.length === 0) return res.status(400).json({ error: "CSV must have a 'phone' column." });
+  const fileName = req.file?.originalname ?? `Pasted numbers (${phones.length.toLocaleString()})`;
   const org = req.auth!.organizationId;
   if (phones.length <= 300) {
     const { rows, summary } = await resolveBulk(org, phones);
     const results = rows.map((r) => toLookupResult(r.input, r.e164, r.resolution, { budgetExceeded: summary.budgetExceeded, error: r.error }));
     const seen = new Set<string>();
     for (const r of results) if (r.phoneE164 && !seen.has(r.phoneE164)) { seen.add(r.phoneE164); await recordLookup(org, req.auth!.userId, r.phoneOriginal, r.phoneE164, r); }
-    return res.json({ message: `Processed ${phones.length} numbers (${summary.twilioValidations} Twilio check(s)).`, results, summary });
+    const jobId = await createCompletedBulkJob(org, req.auth!.userId, fileName, rows, summary);
+    return res.json({ message: `Processed ${phones.length} numbers (${summary.twilioValidations} Twilio check(s)). Download the results below.`, results, summary, jobId });
   }
-  const jobId = await createBulkJob(org, req.auth!.userId, req.file.originalname, phones);
+  const jobId = await createBulkJob(org, req.auth!.userId, fileName, phones);
   res.status(202).json({
-    message: `Queued ${Math.min(phones.length, MAX_BULK).toLocaleString()} numbers.${phones.length > MAX_BULK ? ` Only the first ${MAX_BULK.toLocaleString()} are processed per file.` : ""}`,
+    message: `Queued ${Math.min(phones.length, MAX_BULK).toLocaleString()} numbers.${phones.length > MAX_BULK ? ` Only the first ${MAX_BULK.toLocaleString()} are processed per batch.` : ""}`,
     jobId,
   });
 });

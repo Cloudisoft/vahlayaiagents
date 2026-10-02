@@ -9,7 +9,7 @@ import { loadPublishedSnapshot } from "../../voiceai/campaignVersions.js";
 import { buildVapiCall } from "../../voiceai/assistantBuilder.js";
 import { chunkKnowledge, searchKnowledge } from "../../voiceai/knowledgeBase.js";
 import { parseWindow, resolveTimeZone, zonedLocalToUtc } from "../../voiceai/callingWindow.js";
-import { spokenAgentName } from "../../voiceai/placeholders.js";
+import { callerName } from "../../voiceai/placeholders.js";
 import { AI_OUTCOME_KEYS } from "../../services/dispositionsService.js";
 import { publishEvent } from "../../services/events.js";
 import { notify } from "../../services/notifyService.js";
@@ -28,10 +28,11 @@ async function findCall(message: any) {
   const vapiId = message?.call?.id;
   const ourId = message?.call?.metadata?.vahlayCallId ?? message?.call?.assistantOverrides?.metadata?.vahlayCallId;
   const r = await pool.query(
-    `select c.*, v.name as voice_name, cmp.calling_hours, cmp.time_zone as campaign_tz,
+    `select c.*, v.name as voice_name, ag.name as agent_name, cmp.calling_hours, cmp.time_zone as campaign_tz,
             l.time_zone as lead_tz, l.state as lead_state
      from calls c
      left join voices v on v.id = c.voice_id
+     left join ai_agents ag on ag.id = c.agent_id
      left join campaigns cmp on cmp.id = c.campaign_id
      left join leads l on l.id = c.lead_id
      where ($1::uuid is not null and c.id = $1::uuid) or ($2::text is not null and c.vapi_call_id = $2)
@@ -135,14 +136,14 @@ async function handleStatus(message: any) {
 
 // Transcript messages arrive many times a second during a call; the call
 // row they belong to is looked up once and kept briefly in memory.
-const liveCallCache = new Map<string, { at: number; call: { id: string; organization_id: string; voice_name: string | null; customer_spoke: boolean } }>();
+const liveCallCache = new Map<string, { at: number; call: { id: string; organization_id: string; voice_name: string | null; agent_name: string | null; customer_spoke: boolean } }>();
 async function findLiveCall(message: any) {
   const key = message?.call?.id;
   const hit = key ? liveCallCache.get(key) : undefined;
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.call;
   const call = await findCall(message);
   if (!call) return null;
-  const slim = { id: call.id, organization_id: call.organization_id, voice_name: call.voice_name, customer_spoke: call.customer_spoke };
+  const slim = { id: call.id, organization_id: call.organization_id, voice_name: call.voice_name, agent_name: call.agent_name ?? null, customer_spoke: call.customer_spoke };
   if (key) {
     if (liveCallCache.size > 2000) liveCallCache.clear();
     liveCallCache.set(key, { at: Date.now(), call: slim });
@@ -156,7 +157,7 @@ async function handleTranscript(message: any) {
   const role = message.role === "user" ? "user" : "assistant";
   const final = message.transcriptType === "final";
   const text = String(message.transcript ?? "");
-  const speaker = role === "user" ? "Customer" : spokenAgentName(call.voice_name) || "Agent";
+  const speaker = role === "user" ? "Customer" : callerName(call.agent_name, call.voice_name) || "Agent";
   // Push to the browser before touching the database.
   await publishEvent(call.organization_id, { type: "transcript", callId: call.id, role, speaker, text, partial: !final });
   if (!final || !text.trim()) return;
