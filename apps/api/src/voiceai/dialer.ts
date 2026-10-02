@@ -1,5 +1,7 @@
+import { voiceCredentials } from "../services/cartesiaService.js";
 import os from "node:os";
 import crypto from "node:crypto";
+import { notify as notifyOrg } from "../services/notifyService.js";
 import { pool } from "../db/pool.js";
 import { buildVapiCall } from "./assistantBuilder.js";
 import { loadPublishedSnapshot } from "./campaignVersions.js";
@@ -55,13 +57,8 @@ async function logError(organizationId: string | null, source: string, message: 
     .catch(() => undefined);
 }
 
-async function notify(organizationId: string, type: string, title: string, body: string) {
-  await pool.query(`insert into notifications (organization_id, type, title, body) values ($1,$2,$3,$4)`, [
-    organizationId,
-    type,
-    title,
-    body,
-  ]);
+async function notify(organizationId: string, type: string, title: string, body: string, link?: string) {
+  await notifyOrg(organizationId, { type, title, body, link });
 }
 
 async function pauseCampaign(campaign: any, reason: string) {
@@ -69,7 +66,7 @@ async function pauseCampaign(campaign: any, reason: string) {
     "update campaigns set status = 'paused', paused_reason = $2, updated_at = now() where id = $1 and status = 'active'",
     [campaign.id, reason]
   );
-  await notify(campaign.organization_id, "campaign_paused", `Campaign paused: ${campaign.name}`, reason);
+  await notify(campaign.organization_id, "campaign_paused", `Campaign paused: ${campaign.name}`, reason, `/voice/campaigns/${campaign.id}`);
   await publishEvent(campaign.organization_id, { type: "campaign_status", campaignId: campaign.id, status: "paused", reason });
 }
 
@@ -150,7 +147,7 @@ async function dialCampaignInner(campaignId: string): Promise<number> {
       await pool.query("update campaigns set status = 'completed', updated_at = now() where id = $1 and status = 'active'", [
         campaignId,
       ]);
-      await notify(campaign.organization_id, "campaign_completed", `Campaign completed: ${campaign.name}`, "Every lead has a final outcome.");
+      await notify(campaign.organization_id, "campaign_completed", `Campaign completed: ${campaign.name}`, "Every lead has a final outcome.", `/voice/campaigns/${campaignId}`);
       await publishEvent(campaign.organization_id, { type: "campaign_status", campaignId, status: "completed" });
     }
     return 0;
@@ -225,6 +222,7 @@ async function dialCampaignInner(campaignId: string): Promise<number> {
 
     try {
       const built = buildVapiCall({
+        credentials: await voiceCredentials(campaign.organization_id, snapshot.agent.voice),
         snapshot,
         lead,
         customerNumber: lead.main_phone_e164,

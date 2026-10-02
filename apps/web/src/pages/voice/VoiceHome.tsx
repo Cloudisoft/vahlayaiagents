@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../../lib/api.js";
 import { prefetch, useApi } from "../../lib/useApi.js";
 import { K } from "../../lib/voiceKeys.js";
+import VoicesPanel from "./VoicesPanel.js";
 import { StatusPill, btnDark, btnGhost, btnPrimary, formatPhone, formatSeconds, inputCls } from "../../lib/voice.js";
 
 type Tab = "campaigns" | "agents" | "voices" | "numbers" | "dnc";
@@ -79,7 +80,7 @@ export default function VoiceHome({ tab }: { tab: Tab }) {
   // Each page fetches only what it shows; cached data renders instantly.
   const agentsQ = useApi<{ agents: Agent[] }>(tab === "agents" ? K.agents : null);
   const templatesQ = useApi<{ templates: Template[] }>(tab === "agents" || tab === "campaigns" ? K.templates : null);
-  const voicesQ = useApi<{ voices: Voice[] }>(tab === "voices" ? K.voices : null);
+  const voicesQ = useApi<{ voices: Voice[] }>(null);
   const numbersQ = useApi<{ phoneNumbers: PhoneNumber[] }>(tab === "numbers" ? K.numbers : null);
   const campaignsQ = useApi<{ campaigns: Campaign[] }>(tab === "campaigns" || tab === "numbers" ? K.campaigns : null);
   const dncQ = useApi<{ entries: DncEntry[] }>(tab === "dnc" ? K.dnc : null);
@@ -241,62 +242,7 @@ export default function VoiceHome({ tab }: { tab: Tab }) {
         </div>
       )}
 
-      {tab === "voices" && (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <form
-              className="flex flex-wrap items-end gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                run("add-voice", async () => {
-                  await api("/voice/voices", { method: "POST", body: voiceForm });
-                  setVoiceForm({ providerVoiceId: "", name: "" });
-                  return "Voice added.";
-                });
-              }}
-            >
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Cartesia voice ID</label>
-                <input required value={voiceForm.providerVoiceId} onChange={(e) => setVoiceForm({ ...voiceForm, providerVoiceId: e.target.value })} className={`${inputCls} w-80`} placeholder="a0e99841-438c-4a64-b679-ae501e7d6091" />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">Display name</label>
-                <input required value={voiceForm.name} onChange={(e) => setVoiceForm({ ...voiceForm, name: e.target.value })} className={`${inputCls} w-48`} placeholder="Ray - Conversationalist" />
-              </div>
-              <button disabled={busy !== null} className={btnGhost}>Add voice</button>
-            </form>
-            <button onClick={() => run("sync-voices", async () => (await api<{ message: string }>("/voice/voices/sync", { method: "POST" })).message)} disabled={busy !== null} className={btnDark}>
-              {busy === "sync-voices" ? "Syncing…" : "Sync from Cartesia"}
-            </button>
-          </div>
-          <p className="text-xs text-slate-500">The agent says only the first part of the voice name: "Ray - Conversationalist" introduces itself as Ray.</p>
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
-                <tr>
-                  <th className="text-left px-4 py-2">Name</th>
-                  <th className="text-left px-4 py-2">Provider</th>
-                  <th className="text-left px-4 py-2">Voice ID</th>
-                  <th className="text-left px-4 py-2">Language</th>
-                </tr>
-              </thead>
-              <tbody>
-                {voices.map((v) => (
-                  <tr key={v.id} className="border-t border-slate-100">
-                    <td className="px-4 py-2 font-medium text-slate-900">{v.name}</td>
-                    <td className="px-4 py-2 text-slate-500">{v.provider}</td>
-                    <td className="px-4 py-2 text-slate-400 font-mono text-xs">{v.provider_voice_id}</td>
-                    <td className="px-4 py-2 text-slate-500">{v.language ?? "—"}</td>
-                  </tr>
-                ))}
-                {voices.length === 0 && (
-                  <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-500">No voices yet — sync from Cartesia (API key in Settings) or add one by ID.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {tab === "voices" && <VoicesPanel />}
 
       {tab === "numbers" && (
         <div className="space-y-4">

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, ApiError, getAccessToken } from "../../lib/api.js";
 import { invalidate, useApi } from "../../lib/useApi.js";
 import { K } from "../../lib/voiceKeys.js";
@@ -40,7 +40,11 @@ export default function CallHistory() {
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [applied, setApplied] = useState(EMPTY_FILTERS);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [params] = useSearchParams();
+  const [openId, setOpenId] = useState<string | null>(params.get("call"));
+  useEffect(() => {
+    if (params.get("call")) setOpenId(params.get("call"));
+  }, [params]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());

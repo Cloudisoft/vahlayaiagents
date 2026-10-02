@@ -74,6 +74,7 @@ const campaignSchema = z.object({
     })
     .optional(),
   recordingDisclosure: z.boolean().optional(),
+  backgroundSound: z.boolean().optional(),
 });
 
 // API field -> column, with optional value transform.
@@ -103,6 +104,7 @@ const COLUMNS: Record<string, [string, ((v: any) => unknown)?]> = {
       JSON.stringify(Object.fromEntries(Object.entries(v).filter(([, n]) => n && String(n).trim()).map(([k, n]) => [k, String(n).trim()]))),
   ],
   recordingDisclosure: ["recording_disclosure"],
+  backgroundSound: ["background_sound"],
 };
 
 function toColumns(data: Record<string, unknown>) {

@@ -15,6 +15,11 @@ export interface CampaignSnapshot {
   // Department lines from the escalation matrix; optional on older versions.
   transferTargets?: Partial<Record<TransferDept, string>>;
   recordingDisclosure?: boolean;
+  // Inbound calls greet differently ("Thanks for calling…"); outbound
+  // always uses the standard opening.
+  inboundGreeting?: string;
+  // Office ambience under the agent's voice; older versions had it on.
+  backgroundSound?: boolean;
   maxCallDurationSeconds: number;
   llmModel: string;
   // VAPI model provider; versions published before providers existed are OpenAI.
@@ -49,12 +54,23 @@ export const QUIET_CALLER_CHECKIN_SECONDS = 7;
 export const SOP_AUTHORITY = `## Source of truth
 The SOP / instructions and the campaign script below are your ultimate source of truth. Follow their steps, order, qualifying questions, offers, rebuttals and required statements exactly. When anything else here (personality, tone, FAQs, objection tips, your own judgement) disagrees with the SOP or script, the SOP and script win. Never skip a required step, never invent an offer, price, promotion or policy that isn't in the SOP, script or knowledge base, and never go off-script to improvise a different pitch. If the caller asks something they don't cover, say a specialist will confirm. The only things that override the SOP are the call rules at the end: honouring do-not-call requests, being honest that you are an AI if sincerely asked, and never leaving voicemails.`;
 
-export const DEFAULT_GREETING = "Hi {{first_name}}, this is {{agent_name}} with {{intro_name}}. How are you today?";
+export const DEFAULT_GREETING = "Hi, am I speaking with {{first_name}}? This is {{agent_name}} from {{intro_name}}. How are you doing today?";
+
+// Every outbound call opens the same way: confirm who picked up, say who's
+// calling and from where, then ask how they are. With no name on the lead
+// the agent skips the name check instead of guessing.
+export function standardOpening(vars: Record<string, string | null>): string {
+  const name = vars.first_name || vars.full_name;
+  return name
+    ? `Hi, am I speaking with ${name}? This is ${vars.agent_name} from ${vars.intro_name}. How are you doing today?`
+    : `Hi, this is ${vars.agent_name} from ${vars.intro_name}. How are you doing today?`;
+}
 
 export function platformRules(vars: { agentName: string; introName: string; callbackNumber: string | null }): string {
   return `## Call rules — always follow
 - You are on a live phone call. Speak in short, natural sentences. Ask ONE question at a time, then stop and listen.
-- React to what the caller just said before moving on. If they ask a question, answer it first, then continue.
+- Listen actively: acknowledge what the caller just said in a few words ("Got it", "That makes sense", repeat a key detail) before your next question. If they ask something, answer it right away and directly, then continue. If they interrupt, stop and listen.
+- Sound like a real person: natural, warm, varied phrasing — never robotic, never repeat the same sentence twice.
 - Follow the script step by step, adapting to their answers. NEVER read headings, step numbers, labels, brackets or placeholders out loud.
 - For facts (prices, promotions, speeds, availability) call search_knowledge_base. If the answer isn't there, say a specialist will confirm — never guess or invent prices, promotions or guarantees.
 - Your name is ${vars.agentName}. You are calling on behalf of ${vars.introName}; introduce the company exactly that way and never claim to be a different company. If sincerely asked whether you are an AI, say yes.
@@ -62,6 +78,8 @@ export function platformRules(vars: { agentName: string; introName: string; call
 - Automated phone menu: choose only the option that reaches a live person (operator, sales, front desk). Never explain yourself to a menu.
 - Voicemail greeting or answering machine: never leave a message — end the call immediately without speaking.
 - If they ask not to be called again: apologise briefly, call mark_do_not_call, say goodbye and end the call.
+- Confirm the details on file once the caller is engaged, at a natural point that doesn't break the SOP's flow: their full name, the business name, the email and the phone number we have. Read back what's on file ("I have your email as …, is that still right?") and save any correction with save_lead_details. If something isn't on file, ask for it.
+- Before you close any call where they're still talking to you, capture and save: the best day and time to reach them, an alternate phone number, their email (spell it back letter by letter to confirm), and when they're available for a follow-up or installation. Save each one with save_lead_details as soon as you hear it.
 - Before ending or transferring, record the result with set_call_outcome. Book any agreed callback with book_callback.
 - Only transfer when the caller agrees: say "Let me connect you now" and use the transfer tool.
 - When the conversation is done (goodbye, not interested, wrong number, callback booked), say a short goodbye and end the call right away.${
@@ -82,6 +100,8 @@ function describeLead(lead: Record<string, any>, localTime: string): string {
     lead.lines_count ? `Phone lines: ${lead.lines_count}` : null,
     lead.locations_count ? `Locations: ${lead.locations_count}` : null,
     lead.contract_end_date ? `Contract ends: ${lead.contract_end_date}` : null,
+    `Email on file: ${lead.business_email || lead.decision_maker_email || "none — ask for it"}`,
+    `Phone on file: ${lead.main_phone_e164 || lead.main_phone || "the number you called"}${lead.alt_phone ? `; alternate: ${lead.alt_phone}` : "; no alternate number yet"}`,
     lead.service_address || lead.city ? `Location: ${lead.service_address ?? [lead.city, lead.state].filter(Boolean).join(", ")}` : null,
     ...Object.entries(lead.custom_fields ?? {})
       .filter(([, v]) => v === null || typeof v !== "object")
@@ -148,6 +168,8 @@ export function buildVapiCall(params: {
   leadTimeZone: string;
   metadata: Record<string, string>;
   now?: Date;
+  // Provider keys VAPI needs for this call only (e.g. a cloned Cartesia voice).
+  credentials?: Array<Record<string, string>>;
 }): BuiltCall {
   const { snapshot: s, lead } = params;
   const agentName = spokenAgentName(s.agent.voice?.name) || spokenAgentName(s.agent.name);
@@ -232,11 +254,17 @@ export function buildVapiCall(params: {
       function: {
         name: "save_lead_details",
         description:
-          "Save details the caller gives you as soon as you hear them (email, current bill, services, contract, decision maker, install time). Call it again whenever you learn more.",
+          "Save details the caller confirms or gives you as soon as you hear them (name, business, email, alternate number, best time to contact, availability, current bill, services, contract, decision maker). Call it again whenever you learn more.",
         parameters: {
           type: "object",
           properties: {
+            full_name: { type: "string", description: "Caller's full name as they confirmed it" },
+            business_name: { type: "string", description: "Business name as the caller confirmed it" },
             email: { type: "string", description: "Spell-checked email address the caller confirmed" },
+            alternate_phone: { type: "string", description: "Another number to reach them, digits as given" },
+            best_time_to_contact: { type: "string", description: "Best day/time to reach them, in their words" },
+            availability: { type: "string", description: "When they're free for a follow-up or installation" },
+            details_confirmed: { type: "boolean", description: "Caller confirmed the name, business, email and phone on file are correct" },
             current_provider: { type: "string" },
             current_services: { type: "array", items: { type: "string", enum: ["internet", "phone", "tv", "mobile"] } },
             services_with_other_provider: { type: "array", items: { type: "string", enum: ["internet", "phone", "tv", "mobile"] } },
@@ -285,7 +313,10 @@ export function buildVapiCall(params: {
     });
   }
 
-  const greeting = withDisclosure(renderTemplate(s.agent.greeting || DEFAULT_GREETING, vars), Boolean(s.recordingDisclosure));
+  const greeting = withDisclosure(
+    s.inboundGreeting ? renderTemplate(s.inboundGreeting, vars) : standardOpening(vars),
+    Boolean(s.recordingDisclosure)
+  );
 
   const assistant: Record<string, any> = {
     name: `${introName} – ${agentName}`.slice(0, 40),
@@ -317,7 +348,7 @@ export function buildVapiCall(params: {
     ],
     silenceTimeoutSeconds: SILENCE_TIMEOUT_SECONDS,
     maxDurationSeconds: s.maxCallDurationSeconds,
-    backgroundSound: "office",
+    backgroundSound: s.backgroundSound === false ? "off" : "office",
     endCallMessage: renderTemplate(s.agent.endingMessage || "Thanks for your time. Have a great day!", vars),
     voicemailDetection: {
       provider: "vapi",
@@ -342,6 +373,8 @@ export function buildVapiCall(params: {
       ...(s.agent.voice.provider === "cartesia" ? { model: "sonic-3" } : {}),
     };
   }
+
+  if (params.credentials?.length) assistant.credentials = params.credentials;
 
   const name = [lead.first_name, lead.last_name].filter(Boolean).join(" ") || lead.business_name || undefined;
 

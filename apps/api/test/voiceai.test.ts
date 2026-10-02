@@ -148,7 +148,22 @@ test("VAPI payload respects platform limits and renders the greeting", () => {
     metadata: { vahlayCallId: "x" },
   });
   const a = payload.assistant;
-  assert.equal(a.firstMessage, "Hi Sam, this is Ray with an authorized Spectrum Business reseller. How are you today?");
+  assert.equal(a.firstMessage, "Hi, am I speaking with Sam? This is Ray from an authorized Spectrum Business reseller. How are you doing today?");
+  assert.match(a.model.messages[0].content, /## Source of truth/);
+  assert.match(a.model.messages[0].content, /Email on file: none/);
+  assert.equal(a.backgroundSound, "office");
+
+  // No name on the lead: no name check, just who's calling.
+  const anon = buildVapiCall({
+    snapshot: { ...snapshot, backgroundSound: false },
+    lead: { business_name: "Beta" },
+    customerNumber: "+12145550199",
+    vapiPhoneNumberId: "pn1",
+    leadTimeZone: "America/Chicago",
+    metadata: { vahlayCallId: "y" },
+  }).payload.assistant;
+  assert.equal(anon.firstMessage, "Hi, this is Ray from an authorized Spectrum Business reseller. How are you doing today?");
+  assert.equal(anon.backgroundSound, "off");
   assert.equal(a.voicemailMessage, undefined);
   assert.equal(a.voicemailDetection.beepMaxAwaitSeconds, 0);
   assert.ok(a.voicemailDetection.backoffPlan.frequencySeconds >= VOICEMAIL_FREQUENCY_MIN_SECONDS);

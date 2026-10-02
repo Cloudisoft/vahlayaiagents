@@ -47,6 +47,7 @@ interface Campaign {
   llm_model: string | null;
   transfer_targets: Record<string, string>;
   recording_disclosure: boolean;
+  background_sound: boolean;
   published_version_id: string | null;
   published_at: string | null;
   has_unpublished_changes: boolean;
@@ -124,6 +125,7 @@ const FIELDS = {
   llmModel: "llm_model",
   transferTargets: "transfer_targets",
   recordingDisclosure: "recording_disclosure",
+  backgroundSound: "background_sound",
 } as const;
 type FieldKey = keyof typeof FIELDS;
 
@@ -368,6 +370,12 @@ export default function CampaignDetail() {
                 <label className="flex items-center gap-2 text-sm text-slate-700 py-2">
                   <input type="checkbox" checked={Boolean(value("recordingDisclosure"))} onChange={(e) => set("recordingDisclosure", e.target.checked)} />
                   Say "This call may be recorded for quality purposes." in the opening
+                </label>
+              </Field>
+              <Field label="Office background sound">
+                <label className="flex items-center gap-2 text-sm text-slate-700 py-2">
+                  <input type="checkbox" checked={value("backgroundSound") !== false} onChange={(e) => set("backgroundSound", e.target.checked)} />
+                  Soft office ambience behind the agent so calls sound like a real call center
                 </label>
               </Field>
               <Field label="Model">

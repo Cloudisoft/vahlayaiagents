@@ -41,59 +41,101 @@ function readAutoListen(): boolean {
   }
 }
 
-// Plays the raw 16-bit PCM stream relayed from VAPI. Gain lifts quiet phone
-// audio; the compressor acts as a limiter so the boost never clips.
+const RATES = [8000, 16000, 24000, 32000, 44100, 48000];
+const DETECT_MS = 1500;
+
+// Interleaved stereo (agent on one channel, caller on the other) has
+// neighbouring samples that differ far more than samples two apart.
+function looksStereo(chunks: Int16Array[]): boolean {
+  let adjacent = 0;
+  let skip = 0;
+  for (const c of chunks) {
+    for (let i = 0; i + 2 < c.length; i++) {
+      adjacent += Math.abs(c[i] - c[i + 1]);
+      skip += Math.abs(c[i] - c[i + 2]);
+    }
+  }
+  return skip > 0 && adjacent > skip * 1.1;
+}
+
+// Plays the raw 16-bit PCM stream relayed from VAPI. The format is worked
+// out from the audio itself (channel layout from sample correlation, rate
+// from bytes per second), since byte rate alone can't tell 16 kHz mono
+// from 8 kHz stereo — guessing wrong is what makes a call sound garbled.
 class PcmPlayer {
   private ctx: AudioContext;
-  private gain: GainNode;
+  private out: GainNode;
   private nextTime = 0;
-  private pending: Uint8Array[] = [];
+  private pending: Int16Array[] = [];
+  private detectStart = 0;
+  private detectBytes = 0;
   format: { sampleRate: number; channels: number } | null = null;
+  onFormat?: (f: { sampleRate: number; channels: number }) => void;
 
   constructor() {
     this.ctx = new AudioContext();
     const limiter = this.ctx.createDynamicsCompressor();
-    limiter.threshold.value = -3;
-    limiter.knee.value = 0;
-    limiter.ratio.value = 20;
+    limiter.threshold.value = -6;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 12;
     limiter.attack.value = 0.003;
     limiter.release.value = 0.1;
-    this.gain = this.ctx.createGain();
-    this.gain.gain.value = GAIN;
-    this.gain.connect(limiter).connect(this.ctx.destination);
+    this.out = this.ctx.createGain();
+    this.out.gain.value = GAIN;
+    this.out.connect(limiter).connect(this.ctx.destination);
   }
 
+  // A format announced by the stream itself wins over detection.
   setFormat(sampleRate: number, channels: number) {
+    if (!(sampleRate >= 8000 && sampleRate <= 48000) || ![1, 2].includes(channels)) return;
     this.format = { sampleRate, channels };
+    this.onFormat?.(this.format);
+    this.flush();
+  }
+
+  push(bytes: Uint8Array) {
+    if (bytes.byteLength < 2) return;
+    if (this.ctx.state === "suspended") this.ctx.resume().catch(() => undefined);
+    const samples = new Int16Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + (bytes.byteLength & ~1)));
+    if (this.format) return this.play(samples);
+    const now = performance.now();
+    if (this.detectStart === 0) this.detectStart = now;
+    else this.detectBytes += samples.byteLength;
+    this.pending.push(samples);
+    const elapsed = now - this.detectStart;
+    if (elapsed < DETECT_MS) return;
+    const channels = looksStereo(this.pending) ? 2 : 1;
+    const perChannel = this.detectBytes / (elapsed / 1000) / (2 * channels);
+    const sampleRate = RATES.reduce((best, r) => (Math.abs(r - perChannel) < Math.abs(best - perChannel) ? r : best), RATES[0]);
+    this.setFormat(sampleRate, channels);
+  }
+
+  private flush() {
     const queued = this.pending;
     this.pending = [];
-    for (const c of queued) this.push(c);
+    for (const c of queued) this.play(c);
   }
 
-  push(chunk: Uint8Array) {
-    if (!this.format) {
-      this.pending.push(chunk);
-      return;
-    }
-    const { sampleRate, channels } = this.format;
-    const samples = new Int16Array(chunk.buffer, chunk.byteOffset, Math.floor(chunk.byteLength / 2));
+  private play(samples: Int16Array) {
+    const { sampleRate, channels } = this.format!;
     const frames = Math.floor(samples.length / channels);
     if (frames === 0) return;
-    const buffer = this.ctx.createBuffer(1, frames, sampleRate);
-    const out = buffer.getChannelData(0);
+    const mono = new Float32Array(frames);
+    // Agent and caller are each on their own channel and rarely talk at
+    // once, so summing keeps both at full level (averaging halves them).
     for (let i = 0; i < frames; i++) {
       let sum = 0;
       for (let c = 0; c < channels; c++) sum += samples[i * channels + c];
-      out[i] = sum / channels / 32768;
+      mono[i] = Math.max(-1, Math.min(1, sum / 32768));
     }
+    const buffer = this.ctx.createBuffer(1, frames, sampleRate);
+    buffer.copyToChannel(mono, 0);
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
-    src.connect(this.gain);
-    const now = this.ctx.currentTime;
-    // Re-anchor if we fell behind (network hiccup) instead of piling up delay.
-    if (this.nextTime < now || this.nextTime - now > 1.5) this.nextTime = now + 0.08;
-    src.start(this.nextTime);
-    this.nextTime += buffer.duration;
+    src.connect(this.out);
+    const start = Math.max(this.ctx.currentTime + 0.05, this.nextTime);
+    src.start(start);
+    this.nextTime = start + buffer.duration;
   }
 
   resume() {
@@ -182,6 +224,7 @@ export default function LiveCalls() {
       const token = getAccessToken();
       if (!token) return;
       const player = new PcmPlayer();
+      player.onFormat = (f) => setListenState(`Listening · ${f.sampleRate / 1000} kHz ${f.channels === 2 ? "stereo" : "mono"}`);
       player.resume().catch(() => undefined);
       playerRef.current = player;
       const proto = window.location.protocol === "https:" ? "wss" : "ws";
@@ -198,12 +241,14 @@ export default function LiveCalls() {
         }
         try {
           const msg = JSON.parse(m.data);
-          if (msg.type === "format") {
-            player.setFormat(msg.sampleRate, msg.channels);
-            setListenState(`Listening · ${msg.sampleRate / 1000} kHz ${msg.channels === 2 ? "stereo" : "mono"}${msg.ambiguous ? " (auto-detected)" : ""}`);
+          // VAPI may announce the stream format; otherwise the player detects it.
+          if (msg.type === "upstream") {
+            const up = JSON.parse(msg.data);
+            const rate = Number(up.sampleRate ?? up.sample_rate);
+            if (rate) player.setFormat(rate, Number(up.channels ?? 1));
           }
         } catch {
-          // ignore
+          // not JSON — ignore
         }
       };
       ws.onopen = () => setListenState("Buffering audio…");

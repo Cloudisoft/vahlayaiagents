@@ -1,3 +1,4 @@
+import { voiceCredentials } from "../services/cartesiaService.js";
 import { pool } from "../db/pool.js";
 import { env } from "../config/env.js";
 import { buildVapiCall, type CampaignSnapshot } from "./assistantBuilder.js";
@@ -51,6 +52,7 @@ export async function syncAgentToVapi(agentId: string, organizationId: string): 
     },
   };
   const built = buildVapiCall({
+    credentials: await voiceCredentials(organizationId, snapshot.agent.voice),
     snapshot,
     lead: { first_name: "there", custom_fields: {} },
     customerNumber: "",

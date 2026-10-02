@@ -1,3 +1,5 @@
+import { normalizeE164 } from "../../utils/phone.js";
+import { voiceCredentials } from "../../services/cartesiaService.js";
 import { Router, type Request, type Response } from "express";
 import crypto from "node:crypto";
 import { pool } from "../../db/pool.js";
@@ -10,6 +12,7 @@ import { parseWindow, resolveTimeZone, zonedLocalToUtc } from "../../voiceai/cal
 import { spokenAgentName } from "../../voiceai/placeholders.js";
 import { AI_OUTCOME_KEYS } from "../../services/dispositionsService.js";
 import { publishEvent } from "../../services/events.js";
+import { notify } from "../../services/notifyService.js";
 
 export const vapiWebhookRouter = Router();
 
@@ -75,6 +78,12 @@ vapiWebhookRouter.post("/", async (req: Request, res: Response) => {
           await pool.query("update calls set transfer_status = 'initiated' where id = $1 and transfer_status is null", [call.id]);
           await addEvent(call.id, { type: "transfer", destination: message.destination?.number ?? null });
           await publishEvent(call.organization_id, { type: "call_status", callId: call.id, status: "transferring" });
+          await notify(call.organization_id, {
+            type: "call_transferred",
+            title: "Call transferred",
+            body: `${call.to_number ?? call.from_number ?? "Caller"} → ${message.destination?.number ?? "transfer line"}`,
+            link: "/voice/live",
+          }).catch(() => undefined);
         }
         return res.status(200).json({});
       }
@@ -222,6 +231,12 @@ async function runTool(call: any, name: string, args: Record<string, any>): Prom
         at,
         "CALLBK",
       ]);
+      await notify(call.organization_id, {
+        type: "callback_booked",
+        title: "Callback booked",
+        body: `${call.to_number ?? "A lead"} — ${new Intl.DateTimeFormat("en-US", { timeZone: tz, dateStyle: "medium", timeStyle: "short" }).format(at)}`,
+        link: "/voice/callbacks",
+      }).catch(() => undefined);
       return `Callback booked for ${new Intl.DateTimeFormat("en-US", { timeZone: tz, dateStyle: "full", timeStyle: "short" }).format(at)}.`;
     }
     case "save_lead_details": {
@@ -230,11 +245,27 @@ async function runTool(call: any, name: string, args: Record<string, any>): Prom
       for (const k of [
         "current_services", "services_with_other_provider", "current_monthly_bill", "contract_months_left",
         "early_termination_fee", "decision_maker_name", "direct_number", "business_address_confirmed",
-        "best_install_time", "bill_copy_requested", "notes",
+        "best_install_time", "bill_copy_requested", "notes", "full_name", "business_name", "alternate_phone",
+        "best_time_to_contact", "availability", "details_confirmed",
       ]) {
         if (args[k] !== undefined && args[k] !== null && args[k] !== "") details[k] = args[k];
       }
       const email = typeof args.email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(args.email.trim()) ? args.email.trim().toLowerCase() : null;
+      const alt = typeof args.alternate_phone === "string" ? normalizeE164(args.alternate_phone) : null;
+      const fullName = typeof args.full_name === "string" ? args.full_name.trim().split(/\s+/) : [];
+      await pool.query(
+        `update leads set alt_phone = coalesce($2, alt_phone),
+           first_name = coalesce($3, first_name), last_name = coalesce($4, last_name),
+           business_name = coalesce($5, business_name)
+         where id = $1`,
+        [
+          call.lead_id,
+          alt,
+          fullName.length ? fullName[0] : null,
+          fullName.length > 1 ? fullName.slice(1).join(" ") : null,
+          typeof args.business_name === "string" && args.business_name.trim() ? args.business_name.trim() : null,
+        ]
+      );
       await pool.query(
         `update leads set business_email = coalesce($2, business_email), current_provider = coalesce($3, current_provider),
            custom_fields = coalesce(custom_fields, '{}'::jsonb)
@@ -244,6 +275,7 @@ async function runTool(call: any, name: string, args: Record<string, any>): Prom
         [call.lead_id, email, args.current_provider || null, JSON.stringify(details)]
       );
       if (args.email && !email) return "That email doesn't look complete — read it back to the caller letter by letter and save it again.";
+      if (args.alternate_phone && !alt) return "Saved, but that alternate number looks incomplete — read it back digit by digit and save it again.";
       return "Saved.";
     }
     case "record_survey": {
@@ -325,9 +357,10 @@ async function handleInbound(message: any) {
 
   const tz = resolveTimeZone(parseWindow(campaign.calling_hours), campaign.time_zone, lead);
   const built = buildVapiCall({
+    credentials: await voiceCredentials(campaign.organization_id, snapshot.agent.voice),
     snapshot: {
       ...snapshot,
-      agent: { ...snapshot.agent, greeting: "Thanks for calling {{intro_name}}, this is {{agent_name}}. How can I help you today?" },
+      inboundGreeting: "Thanks for calling {{intro_name}}, this is {{agent_name}}. How can I help you today?",
     },
     lead,
     customerNumber: from ?? "",
@@ -339,5 +372,11 @@ async function handleInbound(message: any) {
   delete assistant.voicemailDetection;
   delete assistant.voicemailMessage;
   await publishEvent(campaign.organization_id, { type: "call_status", callId, status: "in-progress", direction: "inbound" });
+  await notify(campaign.organization_id, {
+    type: "inbound_call",
+    title: "Inbound call",
+    body: `${from ?? "Unknown caller"} → ${campaign.name}`,
+    link: "/voice/live",
+  }).catch(() => undefined);
   return { assistant };
 }

@@ -1,4 +1,5 @@
 import { pool } from "../db/pool.js";
+import { notify } from "../services/notifyService.js";
 import { chatJson } from "../services/openaiService.js";
 import { getVapiCall } from "./vapiClient.js";
 import { finalizeCall, reportFromVapi } from "./callFinalizer.js";
@@ -95,6 +96,14 @@ Respond with JSON:
       model: REVIEW_MODEL,
     };
     await pool.query("update calls set ai_review = $2, ai_review_at = now(), ai_review_error = null where id = $1", [callId, JSON.stringify(clean)]);
+    if (clean.overallScore < 50 && !opts.force) {
+      await notify(call.organization_id, {
+        type: "low_call_score",
+        title: `Call scored ${clean.overallScore}/100`,
+        body: clean.recommendedImprovement.slice(0, 200) || "See the AI review for what went wrong.",
+        link: `/voice/history?call=${callId}`,
+      }).catch(() => undefined);
+    }
     return clean;
   } catch (err) {
     await pool.query("update calls set ai_review_error = $2 where id = $1", [callId, (err as Error).message.slice(0, 500)]);

@@ -208,10 +208,13 @@ export default function AgentNew() {
             </select>
           </div>
         </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Opening line</label>
-          <input value={form.greeting} onChange={(e) => set("greeting", e.target.value)} className={inputCls} />
-          <p className="text-xs text-slate-500 mt-1">Placeholders: {"{{first_name}} {{agent_name}} {{intro_name}} {{company_name}} {{current_provider}}"} — unknown ones are dropped, never read aloud.</p>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+          <div className="font-medium text-slate-700 mb-1">Opening line (same on every outbound call)</div>
+          <div className="text-slate-700">“Hi, am I speaking with <em>first name</em>? This is <em>agent name</em> from <em>campaign’s company</em>. How are you doing today?”</div>
+          <div className="text-xs text-slate-500 mt-1">
+            Leads without a name get: “Hi, this is <em>agent name</em> from <em>company</em>. How are you doing today?” The agent then confirms the name,
+            business, email and phone on file, and before closing captures the best time to call, an alternate number, email and availability.
+          </div>
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">SOP / instructions — the agent's source of truth</label>

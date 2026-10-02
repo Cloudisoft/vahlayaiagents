@@ -30,6 +30,7 @@ export async function buildSnapshot(campaignId: string, organizationId: string):
     transferNumber: r.transfer_number,
     transferTargets: r.transfer_targets ?? {},
     recordingDisclosure: Boolean(r.recording_disclosure),
+    backgroundSound: r.background_sound !== false,
     maxCallDurationSeconds: r.max_call_duration_seconds ?? r.agent_max_duration ?? 600,
     llmModel: r.agent_llm_model || r.llm_model || "gpt-4o-mini",
     llmProvider: r.agent_llm_model ? r.agent_llm_provider || "openai" : "openai",
