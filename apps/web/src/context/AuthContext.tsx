@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, getAccessToken, refreshSession, setAccessToken, setSessionListener } from "../lib/api.js";
+import { api, ApiError, getAccessToken, refreshSession, setAccessToken, setSessionListener } from "../lib/api.js";
 import { clearApiCache } from "../lib/useApi.js";
 
 export interface CurrentUser {
@@ -77,9 +77,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (cached) {
       api<{ user: CurrentUser }>("/auth/me")
         .then(({ user }) => setUser(user))
-        .catch(() => {
-          setAccessToken(null);
-          setUser(null);
+        .catch((err) => {
+          // Only an expired/invalid session logs out; a network error keeps
+          // the cached session and the next request will retry.
+          if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+            setAccessToken(null);
+            setUser(null);
+          }
         });
     } else {
       refresh();
