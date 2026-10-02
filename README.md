@@ -144,7 +144,7 @@ using your Twilio numbers, Cartesia voices and a per-call assistant built
 from the campaign's *published* version.
 
 - *Save & publish*: edits are drafts until published; each publish freezes
-  agent, voice, script, knowledge base, calling and voicemail rules into a
+  agent, voice, script, knowledge base, and calling rules into a
   version. Calls already in progress finish on their version. You're warned
   if the linked agent changed since the last publish.
 - *Dialer*: concurrency, per-lead calling windows (lead's own time zone,
@@ -154,8 +154,8 @@ from the campaign's *published* version.
   restart. Ten identical provider errors in a row pause the campaign with
   the reason shown, instead of burning through the list.
 - *Call behaviour*: the caller can interrupt instantly, the agent waits for
-  them to finish, checks in after 7 s of silence, voicemail detection with a
-  personalised voicemail, warm transfer, DNC requests honoured mid-call,
+  them to finish, checks in after 7 s of silence, hangs up on answering
+  machines without leaving a voicemail, warm transfer, DNC requests honoured mid-call,
   callbacks booked in the lead's time zone, live knowledge-base lookups.
 - *Dispositions*: one per call, first match wins (DNC → voicemail →
   transferred → disconnected in transfer → not in service → busy/no answer
