@@ -95,6 +95,13 @@ if (existsSync(webDist)) {
   // Vite fingerprints everything under /assets, so it can be cached forever;
   // index.html must always be revalidated so new deploys show up at once.
   app.use("/assets", express.static(path.join(webDist, "assets"), { immutable: true, maxAge: "365d", index: false }));
+  // A file from an older deploy that no longer exists must be a 404, not
+  // index.html — the browser would try to run the HTML as code and the page
+  // would go blank. The client reloads onto the new version on a 404.
+  app.use("/assets", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.status(404).type("text/plain").send("Not found");
+  });
   app.use(express.static(webDist, { index: false, maxAge: "1h" }));
   app.get(/^\/(?!api\/|ws).*/, (_req, res) => {
     res.setHeader("Cache-Control", "no-cache");

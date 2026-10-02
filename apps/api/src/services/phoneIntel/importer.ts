@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { parse } from "csv-parse/sync";
 import { pool } from "../../db/pool.js";
+import { notify } from "../notifyService.js";
 import { normalizeE164 } from "../../utils/phone.js";
 import { lineTypeFromHistorical, normalizeCarrier, npaNxx } from "./normalize.js";
 import { rebuildAll } from "./recompute.js";
@@ -109,4 +110,8 @@ async function runImport(importId: string, buffer: Buffer) {
   );
   await rebuildAll();
   await pool.query("update intel_imports set status = 'completed', finished_at = now() where id = $1", [importId]);
+  const who = await pool.query("select u.organization_id from intel_imports i join users u on u.id = i.created_by where i.id = $1", [importId]);
+  if (who.rows[0]) {
+    await notify(who.rows[0].organization_id, { type: "intel_import", title: "Phone history imported", body: `${obs.length.toLocaleString()} records added to phone intelligence.`, link: "/coverage" }).catch(() => undefined);
+  }
 }

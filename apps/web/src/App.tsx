@@ -1,4 +1,6 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
+import { lazyPage } from "./lib/lazyPage.js";
+import PageErrorBoundary from "./components/PageErrorBoundary.js";
 import { Link, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import Login from "./pages/Login.js";
 import ProtectedRoute from "./components/ProtectedRoute.js";
@@ -6,33 +8,33 @@ import Navbar from "./components/Navbar.js";
 import VoiceLayout from "./components/VoiceLayout.js";
 
 // Pages load on demand so the first screen ships only what it needs.
-const Signup = lazy(() => import("./pages/Signup.js"));
-const ForgotPassword = lazy(() => import("./pages/ForgotPassword.js"));
-const ResetPassword = lazy(() => import("./pages/ResetPassword.js"));
-const ApplyPublic = lazy(() => import("./pages/ApplyPublic.js"));
-const Dashboard = lazy(() => import("./pages/Dashboard.js"));
-const Settings = lazy(() => import("./pages/Settings.js"));
-const Usage = lazy(() => import("./pages/Usage.js"));
-const Profile = lazy(() => import("./pages/Profile.js"));
-const AdminPanel = lazy(() => import("./pages/AdminPanel.js"));
-const JobsList = lazy(() => import("./pages/hr/JobsList.js"));
-const JobNew = lazy(() => import("./pages/hr/JobNew.js"));
-const JobDetail = lazy(() => import("./pages/hr/JobDetail.js"));
-const ApplicationDetail = lazy(() => import("./pages/hr/ApplicationDetail.js"));
-const CoverageHome = lazy(() => import("./pages/coverage/CoverageHome.js"));
-const LeadGenHome = lazy(() => import("./pages/leadgen/LeadGenHome.js"));
-const VoiceDashboard = lazy(() => import("./pages/voice/VoiceDashboard.js"));
-const VoiceHome = lazy(() => import("./pages/voice/VoiceHome.js"));
-const AgentNew = lazy(() => import("./pages/voice/AgentNew.js"));
-const CampaignNew = lazy(() => import("./pages/voice/CampaignNew.js"));
-const CampaignDetail = lazy(() => import("./pages/voice/CampaignDetail.js"));
-const Callbacks = lazy(() => import("./pages/voice/Callbacks.js"));
-const LiveCalls = lazy(() => import("./pages/voice/LiveCalls.js"));
-const VoiceLeads = lazy(() => import("./pages/voice/VoiceLeads.js"));
-const CallHistory = lazy(() => import("./pages/voice/CallHistory.js"));
-const Analytics = lazy(() => import("./pages/voice/Analytics.js"));
-const Dispositions = lazy(() => import("./pages/voice/Dispositions.js"));
-const AuditorHome = lazy(() => import("./pages/auditor/AuditorHome.js"));
+const Signup = lazyPage(() => import("./pages/Signup.js"));
+const ForgotPassword = lazyPage(() => import("./pages/ForgotPassword.js"));
+const ResetPassword = lazyPage(() => import("./pages/ResetPassword.js"));
+const ApplyPublic = lazyPage(() => import("./pages/ApplyPublic.js"));
+const Dashboard = lazyPage(() => import("./pages/Dashboard.js"));
+const Settings = lazyPage(() => import("./pages/Settings.js"));
+const Usage = lazyPage(() => import("./pages/Usage.js"));
+const Profile = lazyPage(() => import("./pages/Profile.js"));
+const AdminPanel = lazyPage(() => import("./pages/AdminPanel.js"));
+const JobsList = lazyPage(() => import("./pages/hr/JobsList.js"));
+const JobNew = lazyPage(() => import("./pages/hr/JobNew.js"));
+const JobDetail = lazyPage(() => import("./pages/hr/JobDetail.js"));
+const ApplicationDetail = lazyPage(() => import("./pages/hr/ApplicationDetail.js"));
+const CoverageHome = lazyPage(() => import("./pages/coverage/CoverageHome.js"));
+const LeadGenHome = lazyPage(() => import("./pages/leadgen/LeadGenHome.js"));
+const VoiceDashboard = lazyPage(() => import("./pages/voice/VoiceDashboard.js"));
+const VoiceHome = lazyPage(() => import("./pages/voice/VoiceHome.js"));
+const AgentNew = lazyPage(() => import("./pages/voice/AgentNew.js"));
+const CampaignNew = lazyPage(() => import("./pages/voice/CampaignNew.js"));
+const CampaignDetail = lazyPage(() => import("./pages/voice/CampaignDetail.js"));
+const Callbacks = lazyPage(() => import("./pages/voice/Callbacks.js"));
+const LiveCalls = lazyPage(() => import("./pages/voice/LiveCalls.js"));
+const VoiceLeads = lazyPage(() => import("./pages/voice/VoiceLeads.js"));
+const CallHistory = lazyPage(() => import("./pages/voice/CallHistory.js"));
+const Analytics = lazyPage(() => import("./pages/voice/Analytics.js"));
+const Dispositions = lazyPage(() => import("./pages/voice/Dispositions.js"));
+const AuditorHome = lazyPage(() => import("./pages/auditor/AuditorHome.js"));
 
 // Start downloading the current page's code at boot, in parallel with
 // sign-in, instead of after it.
@@ -84,7 +86,9 @@ function PageTransition() {
   const location = useLocation();
   return (
     <div key={location.pathname} className="animate-page-in">
-      <Outlet />
+      <PageErrorBoundary resetKey={location.pathname}>
+        <Outlet />
+      </PageErrorBoundary>
     </div>
   );
 }
@@ -132,6 +136,7 @@ function VoiceShell() {
 
 export default function App() {
   return (
+    <PageErrorBoundary>
     <Suspense fallback={<PageFallback />}>
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -180,5 +185,6 @@ export default function App() {
         </Route>
       </Routes>
     </Suspense>
+    </PageErrorBoundary>
   );
 }

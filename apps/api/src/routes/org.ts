@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
+import { notify } from "../services/notifyService.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
 import { ALL_MODULES, ALL_TABS, MODULE_TABS, loadAccess, type Access } from "../services/accessService.js";
@@ -162,6 +163,7 @@ orgRouter.post("/users", requireRole("company_admin"), async (req: AuthedRequest
        values ($1, $2, 'user.invited', 'user', $3)`,
       [req.auth!.organizationId, req.auth!.userId, userId]
     );
+    await notify(req.auth!.organizationId, { type: "account_created", title: "New account created", body: `${parsed.data.username ?? parsed.data.email} was added.`, link: "/admin" }).catch(() => undefined);
     res.status(201).json({ userId });
   } catch (err: any) {
     if (err.code === "23505") return res.status(409).json({ error: "A user with this email or username already exists." });

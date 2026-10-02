@@ -14,6 +14,7 @@ import { parseWindow, zonedLocalToUtc } from "../voiceai/callingWindow.js";
 import { normalizeE164 } from "../utils/phone.js";
 import { publishCampaign, agentChangedSincePublish, PublishError } from "../voiceai/campaignVersions.js";
 import { hangUp } from "../voiceai/dialer.js";
+import { notify } from "../services/notifyService.js";
 import { publishEvent, signalSlotFreed } from "../services/events.js";
 
 export const campaignsRouter = Router();
@@ -368,6 +369,14 @@ campaignsRouter.post("/:id/control", requirePermission("campaign.start"), async 
   }
   if (status === "active") await signalSlotFreed(campaign.id);
   await publishEvent(req.auth!.organizationId, { type: "campaign_status", campaignId: campaign.id, status });
+  if (["start", "resume", "pause", "stop", "restart"].includes(action)) {
+    await notify(req.auth!.organizationId, {
+      type: "campaign_status",
+      title: `Campaign ${{ start: "started", resume: "resumed", pause: "paused", stop: "stopped", restart: "restarted" }[action as "start"]}: ${campaign.name}`,
+      body: null,
+      link: `/voice/campaigns/${campaign.id}`,
+    }).catch(() => undefined);
+  }
   res.json({ campaign: result.rows[0] });
 });
 

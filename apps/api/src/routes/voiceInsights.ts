@@ -8,6 +8,7 @@ import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { requireTab } from "../services/accessService.js";
 import { requirePermission } from "../middleware/permissions.js";
+import { notify } from "../services/notifyService.js";
 import { signalSlotFreed } from "../services/events.js";
 import { CALLBACK_CODES, DNC_CODES, POSITIVE_CODES } from "../services/dispositionsService.js";
 
@@ -324,6 +325,7 @@ voiceInsightsRouter.post("/leads/paste", async (req: AuthedRequest, res) => {
   const summary = records.length
     ? await importLeads(org, records, { leadListId: parsed.data.listId ?? null, campaignId: parsed.data.campaignId ?? null, source: "paste" })
     : { imported: 0, duplicates: 0, dncMarked: 0, errors: [], totalErrors: 0 };
+  if (summary.imported) await notify(org, { type: "leads_imported", title: `${summary.imported} lead(s) added`, body: "From pasted numbers.", link: "/voice/leads" }).catch(() => undefined);
   res.json({ results, summary });
 });
 
@@ -339,6 +341,7 @@ voiceInsightsRouter.post("/leads/import", upload.single("file"), async (req: Aut
   const listId = typeof req.body?.listId === "string" && req.body.listId ? req.body.listId : null;
   const campaignId = typeof req.body?.campaignId === "string" && req.body.campaignId ? req.body.campaignId : null;
   const summary = await importLeads(req.auth!.organizationId, rows, { leadListId: listId, campaignId, source: "file_import" });
+  await notify(req.auth!.organizationId, { type: "leads_imported", title: `${summary.imported} lead(s) imported`, body: req.file.originalname, link: "/voice/leads" }).catch(() => undefined);
   res.json({ summary });
 });
 

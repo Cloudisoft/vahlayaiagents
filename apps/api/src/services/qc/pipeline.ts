@@ -304,6 +304,12 @@ export async function runAudit(id: string): Promise<QcStatus> {
       [id, e.status, e.userMessage, e.technical.slice(0, 4000), stage]
     );
     await logStage(id, "failed", { status: e.status, stage, error: e.technical.slice(0, 1000) });
+    await notify(audit.organization_id, {
+      type: "audit_failed",
+      title: `QC ${e.status.replace(/_/g, " ").toLowerCase()}`,
+      body: `${audit.original_file_name ?? "Recording"}: ${e.userMessage}`.slice(0, 240),
+      link: `/qc?audit=${id}`,
+    }).catch(() => undefined);
     await pool.query(`insert into system_logs (organization_id, level, source, message, metadata) values ($1,'error','qc_pipeline',$2,$3)`, [
       audit.organization_id,
       e.technical.slice(0, 2000),
