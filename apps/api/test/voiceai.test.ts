@@ -124,7 +124,6 @@ test("VAPI payload respects platform limits and renders the greeting", () => {
     transferNumber: "+13025550100",
     maxCallDurationSeconds: 600,
     llmModel: "gpt-4o-mini",
-    voicemail: { enabled: true, script: "Hi {{first_name}}, call {{callback_number}}." },
     agent: {
       id: "a1",
       name: "Spectrum Business Outbound",
@@ -150,7 +149,8 @@ test("VAPI payload respects platform limits and renders the greeting", () => {
   });
   const a = payload.assistant;
   assert.equal(a.firstMessage, "Hi Sam, this is Ray with an authorized Spectrum Business reseller. How are you today?");
-  assert.equal(a.voicemailMessage, "Hi Sam, call +13023423925.");
+  assert.equal(a.voicemailMessage, undefined);
+  assert.equal(a.voicemailDetection.beepMaxAwaitSeconds, 0);
   assert.ok(a.voicemailDetection.backoffPlan.frequencySeconds >= VOICEMAIL_FREQUENCY_MIN_SECONDS);
   assert.ok(a.voicemailDetection.beepMaxAwaitSeconds <= VOICEMAIL_BEEP_MAX_SECONDS);
   assert.equal(a.voice.model, "sonic-3");

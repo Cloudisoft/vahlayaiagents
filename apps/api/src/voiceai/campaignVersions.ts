@@ -30,7 +30,6 @@ export async function buildSnapshot(campaignId: string, organizationId: string):
     transferNumber: r.transfer_number,
     maxCallDurationSeconds: r.max_call_duration_seconds ?? r.agent_max_duration ?? 600,
     llmModel: r.agent_llm_model || r.llm_model || "gpt-4o-mini",
-    voicemail: { enabled: r.voicemail_enabled, script: r.voicemail_script ?? "" },
     agent: {
       id: r.agent_id,
       name: r.agent_name,

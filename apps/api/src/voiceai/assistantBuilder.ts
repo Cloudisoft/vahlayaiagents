@@ -14,7 +14,6 @@ export interface CampaignSnapshot {
   transferNumber: string | null;
   maxCallDurationSeconds: number;
   llmModel: string;
-  voicemail: { enabled: boolean; script: string };
   agent: {
     id: string;
     name: string;
@@ -34,7 +33,8 @@ export interface CampaignSnapshot {
 // VAPI's real limits (playbook §10), not the SDK docs': check interval
 // must be ≥ 2.5 s and the beep wait ≤ 30 s or the API rejects the call.
 export const VOICEMAIL_FREQUENCY_MIN_SECONDS = 2.5;
-export const VOICEMAIL_BEEP_MAX_SECONDS = 30;
+// No voicemails are left: hang up as soon as a machine is detected.
+export const VOICEMAIL_BEEP_MAX_SECONDS = 0;
 export const SILENCE_TIMEOUT_SECONDS = 20;
 export const QUIET_CALLER_CHECKIN_SECONDS = 7;
 
@@ -49,7 +49,7 @@ export function platformRules(vars: { agentName: string; introName: string; call
 - Your name is ${vars.agentName}. You are calling on behalf of ${vars.introName}; introduce the company exactly that way and never claim to be a different company. If sincerely asked whether you are an AI, say yes.
 - Receptionist, gatekeeper or call screener: in ONE sentence give your name, company and reason for calling, then wait. Ask for whoever handles the business's phone and internet services, or the best time to reach them.
 - Automated phone menu: choose only the option that reaches a live person (operator, sales, front desk). Never explain yourself to a menu.
-- Voicemail greeting or answering machine: say nothing; the system leaves the message.
+- Voicemail greeting or answering machine: never leave a message — end the call immediately without speaking.
 - If they ask not to be called again: apologise briefly, call mark_do_not_call, say goodbye and end the call.
 - Before ending or transferring, record the result with set_call_outcome. Book any agreed callback with book_callback.
 - Only transfer when the caller agrees: say "Let me connect you now" and use the transfer tool.
@@ -227,9 +227,6 @@ export function buildVapiCall(params: {
     metadata: params.metadata,
   };
 
-  if (s.voicemail.enabled && s.voicemail.script) {
-    assistant.voicemailMessage = renderTemplate(s.voicemail.script, vars);
-  }
   if (s.agent.voice) {
     assistant.voice = {
       provider: s.agent.voice.provider,

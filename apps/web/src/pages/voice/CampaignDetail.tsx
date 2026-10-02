@@ -39,8 +39,6 @@ interface Campaign {
   callback_number: string | null;
   script: string | null;
   knowledge_text: string | null;
-  voicemail_enabled: boolean;
-  voicemail_script: string | null;
   retry_on_voicemail: boolean;
   retry_delay_minutes: number;
   lead_cooldown_hours: number;
@@ -116,8 +114,6 @@ const FIELDS = {
   callbackNumber: "callback_number",
   script: "script",
   knowledgeText: "knowledge_text",
-  voicemailEnabled: "voicemail_enabled",
-  voicemailScript: "voicemail_script",
   retryOnVoicemail: "retry_on_voicemail",
   retryDelayMinutes: "retry_delay_minutes",
   leadCooldownHours: "lead_cooldown_hours",
@@ -440,19 +436,11 @@ export default function CampaignDetail() {
           </Section>
 
           <Section title="Voicemail">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={Boolean(value("voicemailEnabled"))} onChange={(e) => set("voicemailEnabled", e.target.checked)} />
-              Leave a voicemail when a machine answers
-            </label>
+            <p className="text-sm text-slate-500">No voicemails are left: when an answering machine picks up, the agent hangs up right away and the call is marked Voicemail.</p>
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" checked={Boolean(value("retryOnVoicemail"))} onChange={(e) => set("retryOnVoicemail", e.target.checked)} />
               Retry leads that went to voicemail (counts toward max attempts)
             </label>
-            {value("voicemailEnabled") && (
-              <Field label="Voicemail message" hint="Short and specific: who's calling, why, and the callback number.">
-                <textarea rows={3} value={value("voicemailScript") ?? ""} onChange={(e) => set("voicemailScript", e.target.value)} className={inputCls} placeholder="Hi {{first_name}}, this is {{agent_name}} with {{intro_name}}. Please call us back at {{callback_number}}." />
-              </Field>
-            )}
           </Section>
         </div>
       )}
