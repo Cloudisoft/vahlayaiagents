@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { getAccessToken } from "./api.js";
+import { getAccessToken, refreshSession } from "./api.js";
 import { useAuth } from "../context/AuthContext.js";
 
 export interface RealtimeEvent {
@@ -40,11 +40,14 @@ export function useOrgEvents(onEvent: (e: RealtimeEvent) => void) {
           // ignore non-JSON frames
         }
       };
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         if (closed) return;
         handler.current({ type: "disconnected" });
         attempt++;
-        timer = setTimeout(connect, Math.min(15000, 500 * 2 ** attempt));
+        const retry = () => (timer = setTimeout(connect, Math.min(15000, 500 * 2 ** attempt)));
+        // 4001 = token rejected (expired): get a fresh one before reconnecting.
+        if (ev.code === 4001) refreshSession().finally(retry);
+        else retry();
       };
     };
     connect();

@@ -34,6 +34,42 @@ const Analytics = lazy(() => import("./pages/voice/Analytics.js"));
 const Dispositions = lazy(() => import("./pages/voice/Dispositions.js"));
 const AuditorHome = lazy(() => import("./pages/auditor/AuditorHome.js"));
 
+// Start downloading the current page's code at boot, in parallel with
+// sign-in, instead of after it.
+const BOOT_CHUNKS: Record<string, () => Promise<unknown>> = {
+  "/": () => import("./pages/Dashboard.js"),
+  "/hr": () => import("./pages/hr/JobsList.js"),
+  "/coverage": () => import("./pages/coverage/CoverageHome.js"),
+  "/leadgen": () => import("./pages/leadgen/LeadGenHome.js"),
+  "/settings": () => import("./pages/Settings.js"),
+  "/usage": () => import("./pages/Usage.js"),
+  "/profile": () => import("./pages/Profile.js"),
+  "/admin": () => import("./pages/AdminPanel.js"),
+  "/qc": () => import("./pages/auditor/AuditorHome.js"),
+  "/voice": () => import("./pages/voice/VoiceDashboard.js"),
+  "/voice/campaigns": () => import("./pages/voice/VoiceHome.js"),
+  "/voice/callbacks": () => import("./pages/voice/Callbacks.js"),
+  "/voice/live": () => import("./pages/voice/LiveCalls.js"),
+  "/voice/leads": () => import("./pages/voice/VoiceLeads.js"),
+  "/voice/history": () => import("./pages/voice/CallHistory.js"),
+  "/voice/analytics": () => import("./pages/voice/Analytics.js"),
+  "/voice/dispositions": () => import("./pages/voice/Dispositions.js"),
+  "/voice/agents": () => import("./pages/voice/VoiceHome.js"),
+  "/voice/voices": () => import("./pages/voice/VoiceHome.js"),
+  "/voice/numbers": () => import("./pages/voice/VoiceHome.js"),
+  "/voice/dnc": () => import("./pages/voice/VoiceHome.js"),
+  "/signup": () => import("./pages/Signup.js"),
+};
+function preloadCurrentRoute() {
+  const path = window.location.pathname.replace(/\/$/, "") || "/";
+  const exact = BOOT_CHUNKS[path];
+  const prefix = Object.keys(BOOT_CHUNKS)
+    .filter((k) => k !== "/" && path.startsWith(k + "/"))
+    .sort((a, b) => b.length - a.length)[0];
+  (exact ?? (prefix === "/voice/campaigns" ? () => import("./pages/voice/CampaignDetail.js") : prefix === "/voice/agents" ? () => import("./pages/voice/AgentNew.js") : prefix ? BOOT_CHUNKS[prefix] : undefined))?.().catch(() => undefined);
+}
+preloadCurrentRoute();
+
 function PageFallback() {
   return (
     <div className="fixed top-0 left-0 right-0 z-50 h-0.5 overflow-hidden" aria-hidden>

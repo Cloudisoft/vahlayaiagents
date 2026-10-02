@@ -42,7 +42,7 @@ authRouter.post("/signup", async (req, res) => {
     const user = await signup(parsed.data);
     const { refreshToken, expiresAt } = await createSession(user.id, req.headers["user-agent"], req.ip);
     res.cookie(REFRESH_COOKIE, refreshToken, { ...cookieOpts, expires: expiresAt });
-    res.status(201).json({ accessToken: signAccessToken(user), user });
+    res.status(201).json({ accessToken: signAccessToken(user), user: (await loadProfile(user.id)) ?? user });
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
   }
@@ -57,7 +57,7 @@ authRouter.post("/login", async (req, res) => {
     const user = await login(parsed.data.identifier, parsed.data.password);
     const { refreshToken, expiresAt } = await createSession(user.id, req.headers["user-agent"], req.ip);
     res.cookie(REFRESH_COOKIE, refreshToken, { ...cookieOpts, expires: expiresAt });
-    res.json({ accessToken: signAccessToken(user), user });
+    res.json({ accessToken: signAccessToken(user), user: (await loadProfile(user.id)) ?? user });
   } catch (err) {
     res.status(401).json({ error: (err as Error).message });
   }
@@ -68,7 +68,7 @@ authRouter.post("/refresh", async (req, res) => {
   if (!token) return res.status(401).json({ error: "No refresh token." });
   const user = await rotateSession(token);
   if (!user) return res.status(401).json({ error: "Refresh token invalid or expired." });
-  res.json({ accessToken: signAccessToken(user), user });
+  res.json({ accessToken: signAccessToken(user), user: (await loadProfile(user.id)) ?? user });
 });
 
 authRouter.post("/logout", async (req, res) => {
@@ -108,7 +108,9 @@ authRouter.post("/reset-password", async (req, res) => {
   res.json({ message: "Password updated successfully." });
 });
 
-authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
+// The full session profile; returned by login/signup/refresh too so the
+// browser needs no separate /me round trip.
+async function loadProfile(userId: string) {
   const result = await pool.query(
     `select u.id, u.email, u.username, u.first_name, u.last_name, u.organization_id, r.key as role,
             o.name as organization_name, o.settings as organization_settings,
@@ -119,9 +121,14 @@ authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
      left join user_module_access uma on uma.user_id = u.id
      where u.id = $1
      group by u.id, r.key, o.name, o.settings`,
-    [req.auth!.userId]
+    [userId]
   );
-  if (result.rows.length === 0) return res.status(404).json({ error: "User not found." });
   const user = result.rows[0];
-  res.json({ user: { ...user, permissions: permissionsFor(user.role) } });
+  return user ? { ...user, permissions: permissionsFor(user.role) } : null;
+}
+
+authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {
+  const user = await loadProfile(req.auth!.userId);
+  if (!user) return res.status(404).json({ error: "User not found." });
+  res.json({ user });
 });

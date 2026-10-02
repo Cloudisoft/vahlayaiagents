@@ -31,6 +31,7 @@ import { dashboardRouter } from "./routes/dashboard.js";
 import { usageRouter } from "./routes/usage.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { initRealtime } from "./services/realtimeService.js";
+import { warmPool } from "./db/pool.js";
 import { authRateLimit, publicRateLimit } from "./middleware/rateLimit.js";
 
 const app = express();
@@ -107,5 +108,6 @@ const server = http.createServer(app);
 initRealtime(server);
 
 server.listen(env.port, () => {
+  warmPool().catch(() => undefined);
   console.log(`Vahlay AI API listening on port ${env.port} (${env.nodeEnv})`);
 });

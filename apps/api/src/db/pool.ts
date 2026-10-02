@@ -5,9 +5,20 @@ import { pgConfig } from "./config.js";
 export const pool = new pg.Pool({
   ...pgConfig(env.databaseUrl),
   max: env.databasePoolMax,
-  idleTimeoutMillis: 30_000,
+  // Keep connections warm: a fresh TLS connection to the Supabase pooler
+  // costs ~100 ms, which users feel on the first click after a quiet spell.
+  idleTimeoutMillis: 10 * 60_000,
   keepAlive: true,
 });
+
+// An idle client dropped by the pooler must not crash the process.
+pool.on("error", (err) => console.error("[db] idle client error:", err.message));
+
+// Open a few connections at boot so the first page load doesn't pay for them.
+export async function warmPool(count = 3) {
+  const clients = await Promise.all(Array.from({ length: count }, () => pool.connect().catch(() => null)));
+  for (const c of clients) c?.release();
+}
 
 export async function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
   text: string,
