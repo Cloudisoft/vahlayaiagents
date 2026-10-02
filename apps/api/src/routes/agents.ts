@@ -3,6 +3,7 @@ import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { requireModuleAccess } from "../middleware/moduleAccess.js";
+import { requireTab } from "../services/accessService.js";
 import { requireRole } from "../middleware/rbac.js";
 import { listVapiAssistants } from "../voiceai/vapiClient.js";
 import { AGENT_TEMPLATES } from "../voiceai/agentTemplates.js";
@@ -10,6 +11,7 @@ import { AGENT_TEMPLATES } from "../voiceai/agentTemplates.js";
 export const agentsRouter = Router();
 agentsRouter.use(requireAuth);
 agentsRouter.use(requireModuleAccess("voice_agents"));
+agentsRouter.use(requireTab("voice_agents", "agents", { readVia: ["campaigns"] }));
 agentsRouter.use(requireRole("agent_manager", "hr"));
 
 const AGENT_TYPES = [

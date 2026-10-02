@@ -24,6 +24,7 @@
     "dotenv": "^16.4.5",
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
+    "express-async-errors": "^3.1.1",
     "express-rate-limit": "^7.4.0",
     "ffmpeg-static": "^5.2.0",
     "helmet": "^7.1.0",

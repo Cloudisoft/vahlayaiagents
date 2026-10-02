@@ -14,6 +14,9 @@ export interface CurrentUser {
   organization_settings: { enabledModules?: string[] } | null;
   enabled_modules: string[];
   permissions: string[];
+  is_owner?: boolean;
+  full_access?: boolean;
+  disabled_tabs?: string[];
 }
 
 interface AuthContextValue {

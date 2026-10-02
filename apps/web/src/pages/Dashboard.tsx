@@ -39,7 +39,6 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [orgEnabled, setOrgEnabled] = useState<string[] | null>(null);
   const [busyModule, setBusyModule] = useState<string | null>(null);
-  const isAdmin = user?.role === "super_admin" || user?.role === "company_admin";
 
   useEffect(() => {
     api<DashboardData>("/dashboard").then(setData);
@@ -61,7 +60,7 @@ export default function Dashboard() {
     }
   }
 
-  const hasUserAccess = (moduleKey: string) => isAdmin || (user?.enabled_modules ?? []).includes(moduleKey);
+  const hasUserAccess = (moduleKey: string) => Boolean(user?.full_access) || (user?.enabled_modules ?? []).includes(moduleKey);
 
   return (
     <div>
@@ -122,7 +121,7 @@ export default function Dashboard() {
                 Enter {m.title.replace("Vahlay", "").replace("Smart", "").trim()} →
               </Link>
 
-              {isAdmin && (
+              {user?.full_access && (
                 <label className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100 text-sm">
                   <span className="text-slate-600">Enabled</span>
                   <button

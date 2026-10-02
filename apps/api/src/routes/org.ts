@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
+import { ALL_MODULES, ALL_TABS, MODULE_TABS, loadAccess, type Access } from "../services/accessService.js";
 
 export const orgRouter = Router();
 orgRouter.use(requireAuth);
@@ -39,9 +40,74 @@ orgRouter.get("/modules", async (_req, res) => {
   res.json({ modules: result.rows });
 });
 
+// What exists, and what the signed-in admin may hand out (their own access).
+orgRouter.get("/access-catalog", requireRole("company_admin"), async (req: AuthedRequest, res) => {
+  const a = await loadAccess(req.auth!.userId, req.auth!.role);
+  res.json({
+    modules: ALL_MODULES,
+    tabs: MODULE_TABS,
+    grantable: {
+      full: a.full,
+      modules: [...a.modules],
+      tabs: ALL_TABS.filter((t) => a.modules.has(t.split(".")[0]) && !a.disabledTabs.has(t)),
+    },
+  });
+});
+
+async function targetUser(req: AuthedRequest) {
+  const r = await pool.query<{ id: string; is_owner: boolean; role: string }>(
+    `select u.id, u.is_owner, r.key as role from users u join roles r on r.id = u.role_id
+     where u.id = $1 and u.organization_id = $2`,
+    [req.params.id, req.auth!.organizationId]
+  );
+  return r.rows[0] ?? null;
+}
+
+// Only the owner (or a platform super admin) may change the owner's account.
+async function guardTarget(req: AuthedRequest, actor: Access) {
+  const t = await targetUser(req);
+  if (!t) return { error: [404, "User not found."] as const };
+  if (t.is_owner && !actor.full) return { error: [403, "Only the account owner can change the owner's account."] as const };
+  if (t.role === "super_admin" && req.auth!.role !== "super_admin") return { error: [403, "You can't change a platform admin."] as const };
+  return { target: t };
+}
+
+// Apply module + tab grants within the actor's own scope. Anything outside
+// the actor's scope on the target is left exactly as it was.
+async function applyAccess(actor: Access, actorId: string, userId: string, modules: string[], disabledTabs: string[]) {
+  const grantableModules = actor.full ? new Set<string>(ALL_MODULES) : actor.modules;
+  for (const m of modules) if (!grantableModules.has(m)) throw new Error(`You can't grant the ${m} module — you don't have it yourself.`);
+  for (const m of grantableModules) {
+    await pool.query(
+      `insert into user_module_access (user_id, module_key, enabled, granted_by) values ($1,$2,$3,$4)
+       on conflict (user_id, module_key) do update set enabled = excluded.enabled, granted_by = excluded.granted_by`,
+      [userId, m, modules.includes(m), actorId]
+    );
+  }
+  for (const tab of ALL_TABS) {
+    const moduleKey = tab.split(".")[0];
+    if (!grantableModules.has(moduleKey)) continue;
+    const actorHasTab = actor.full || !actor.disabledTabs.has(tab);
+    if (!actorHasTab) {
+      // The target can't receive a tab the actor lacks; leave any existing grant alone.
+      await pool.query(
+        `insert into user_tab_access (user_id, tab_key, enabled, granted_by) values ($1,$2,false,$3) on conflict (user_id, tab_key) do nothing`,
+        [userId, tab, actorId]
+      );
+      continue;
+    }
+    await pool.query(
+      `insert into user_tab_access (user_id, tab_key, enabled, granted_by, updated_at) values ($1,$2,$3,$4,now())
+       on conflict (user_id, tab_key) do update set enabled = excluded.enabled, granted_by = excluded.granted_by, updated_at = now()`,
+      [userId, tab, !disabledTabs.includes(tab), actorId]
+    );
+  }
+}
+
 orgRouter.get("/users", requireRole("company_admin"), async (req: AuthedRequest, res) => {
   const result = await pool.query(
-    `select u.id, u.email, u.username, u.first_name, u.last_name, u.is_active, u.last_login_at, r.key as role,
+    `select u.id, u.email, u.username, u.first_name, u.last_name, u.is_active, u.last_login_at, r.key as role, u.is_owner,
+            (select coalesce(array_agg(tab_key), '{}') from user_tab_access where user_id = u.id and not enabled) as disabled_tabs,
             coalesce(
               json_agg(json_build_object('moduleKey', uma.module_key, 'enabled', uma.enabled)) filter (where uma.module_key is not null),
               '[]'
@@ -65,12 +131,16 @@ const inviteSchema = z.object({
   lastName: z.string().optional(),
   temporaryPassword: z.string().min(8),
   moduleKeys: z.array(z.string()).optional(),
+  disabledTabs: z.array(z.string()).optional(),
 });
 
 orgRouter.post("/users", requireRole("company_admin"), async (req: AuthedRequest, res) => {
   const parsed = inviteSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
-  const { email, username, role, firstName, lastName, temporaryPassword, moduleKeys } = parsed.data;
+  const { email, username, role, firstName, lastName, temporaryPassword, moduleKeys, disabledTabs } = parsed.data;
+  const actor = await loadAccess(req.auth!.userId, req.auth!.role);
+  const blocked = (moduleKeys ?? []).find((m) => !actor.full && !actor.modules.has(m));
+  if (blocked) return res.status(403).json({ error: `You can't grant the ${blocked} module — you don't have it yourself.` });
 
   const roleRow = await pool.query<{ id: string }>("select id from roles where key = $1", [role]);
   if (roleRow.rows.length === 0) return res.status(400).json({ error: "Unknown role." });
@@ -85,13 +155,7 @@ orgRouter.post("/users", requireRole("company_admin"), async (req: AuthedRequest
     );
     const userId = result.rows[0].id;
 
-    for (const moduleKey of moduleKeys ?? []) {
-      await pool.query(
-        `insert into user_module_access (user_id, module_key, enabled, granted_by) values ($1,$2,true,$3)
-         on conflict (user_id, module_key) do update set enabled = true`,
-        [userId, moduleKey, req.auth!.userId]
-      );
-    }
+    await applyAccess(actor, req.auth!.userId, userId, moduleKeys ?? [], disabledTabs ?? []);
 
     await pool.query(
       `insert into audit_logs (organization_id, actor_user_id, action, entity_type, entity_id)
@@ -110,6 +174,9 @@ const roleSchema = z.object({ role: z.enum(["company_admin", "hr", "recruiter", 
 orgRouter.patch("/users/:id/role", requireRole("company_admin"), async (req: AuthedRequest, res) => {
   const parsed = roleSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  if (req.params.id === req.auth!.userId) return res.status(400).json({ error: "You can't change your own role." });
+  const g = await guardTarget(req, await loadAccess(req.auth!.userId, req.auth!.role));
+  if (g.error) return res.status(g.error[0]).json({ error: g.error[1] });
   const roleRow = await pool.query<{ id: string }>("select id from roles where key = $1", [parsed.data.role]);
   if (roleRow.rows.length === 0) return res.status(400).json({ error: "Unknown role." });
   const result = await pool.query(
@@ -120,29 +187,35 @@ orgRouter.patch("/users/:id/role", requireRole("company_admin"), async (req: Aut
   res.status(204).end();
 });
 
-const modulesSchema = z.object({ modules: z.array(z.object({ moduleKey: z.string(), enabled: z.boolean() })) });
+const accessSchema = z.object({ modules: z.array(z.string()), disabledTabs: z.array(z.string()).default([]) });
 
-orgRouter.patch("/users/:id/modules", requireRole("company_admin"), async (req: AuthedRequest, res) => {
-  const parsed = modulesSchema.safeParse(req.body);
+orgRouter.patch("/users/:id/access", requireRole("company_admin"), async (req: AuthedRequest, res) => {
+  const parsed = accessSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
-
-  const user = await pool.query("select id from users where id = $1 and organization_id = $2", [
-    req.params.id,
-    req.auth!.organizationId,
-  ]);
-  if (user.rows.length === 0) return res.status(404).json({ error: "User not found." });
-
-  for (const m of parsed.data.modules) {
-    await pool.query(
-      `insert into user_module_access (user_id, module_key, enabled, granted_by) values ($1,$2,$3,$4)
-       on conflict (user_id, module_key) do update set enabled = excluded.enabled`,
-      [req.params.id, m.moduleKey, m.enabled, req.auth!.userId]
-    );
+  if (req.params.id === req.auth!.userId) return res.status(400).json({ error: "You can't change your own access." });
+  const actor = await loadAccess(req.auth!.userId, req.auth!.role);
+  const g = await guardTarget(req, actor);
+  if (g.error) return res.status(g.error[0]).json({ error: g.error[1] });
+  if (g.target!.is_owner) return res.status(400).json({ error: "The account owner always has full access." });
+  try {
+    await applyAccess(actor, req.auth!.userId, req.params.id, parsed.data.modules, parsed.data.disabledTabs);
+  } catch (err) {
+    return res.status(403).json({ error: (err as Error).message });
   }
+  await pool.query(
+    `insert into audit_logs (organization_id, actor_user_id, action, entity_type, entity_id, metadata)
+     values ($1, $2, 'user.access_changed', 'user', $3, $4)`,
+    [req.auth!.organizationId, req.auth!.userId, req.params.id, JSON.stringify(parsed.data)]
+  );
   res.status(204).end();
 });
 
 orgRouter.patch("/users/:id/status", requireRole("company_admin"), async (req: AuthedRequest, res) => {
+  {
+    const g = await guardTarget(req, await loadAccess(req.auth!.userId, req.auth!.role));
+    if (g.error) return res.status(g.error[0]).json({ error: g.error[1] });
+    if (g.target!.is_owner && req.method !== "POST") return res.status(400).json({ error: "The account owner can't be disabled or deleted." });
+  }
   const parsed = z.object({ isActive: z.boolean() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
   if (req.params.id === req.auth!.userId) return res.status(400).json({ error: "You cannot deactivate your own account." });
@@ -155,6 +228,11 @@ orgRouter.patch("/users/:id/status", requireRole("company_admin"), async (req: A
 });
 
 orgRouter.post("/users/:id/reset-password", requireRole("company_admin"), async (req: AuthedRequest, res) => {
+  {
+    const g = await guardTarget(req, await loadAccess(req.auth!.userId, req.auth!.role));
+    if (g.error) return res.status(g.error[0]).json({ error: g.error[1] });
+    if (g.target!.is_owner && req.method !== "POST") return res.status(400).json({ error: "The account owner can't be disabled or deleted." });
+  }
   const parsed = z.object({ newPassword: z.string().min(8) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
   const passwordHash = await bcrypt.hash(parsed.data.newPassword, 12);
@@ -168,6 +246,11 @@ orgRouter.post("/users/:id/reset-password", requireRole("company_admin"), async 
 });
 
 orgRouter.delete("/users/:id", requireRole("company_admin"), async (req: AuthedRequest, res) => {
+  {
+    const g = await guardTarget(req, await loadAccess(req.auth!.userId, req.auth!.role));
+    if (g.error) return res.status(g.error[0]).json({ error: g.error[1] });
+    if (g.target!.is_owner && req.method !== "POST") return res.status(400).json({ error: "The account owner can't be disabled or deleted." });
+  }
   if (req.params.id === req.auth!.userId) return res.status(400).json({ error: "You cannot delete your own account." });
   await pool.query("delete from users where id = $1 and organization_id = $2", [req.params.id, req.auth!.organizationId]);
   res.status(204).end();

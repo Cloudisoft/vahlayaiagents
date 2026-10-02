@@ -2,6 +2,7 @@ import { Router } from "express";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { requireModuleAccess } from "../middleware/moduleAccess.js";
+import { requireTab } from "../services/accessService.js";
 import { requirePermission } from "../middleware/permissions.js";
 import { signalSlotFreed } from "../services/events.js";
 import { CALLBACK_CODES, DNC_CODES, POSITIVE_CODES } from "../services/dispositionsService.js";
@@ -9,6 +10,14 @@ import { CALLBACK_CODES, DNC_CODES, POSITIVE_CODES } from "../services/dispositi
 export const voiceInsightsRouter = Router();
 voiceInsightsRouter.use(requireAuth);
 voiceInsightsRouter.use(requireModuleAccess("voice_agents"));
+const summaryTab = requireTab("voice_agents", "analytics", { readVia: ["dashboard"] });
+const callbacksTab = requireTab("voice_agents", "callbacks", { readVia: ["dashboard"] });
+const leadsTab = requireTab("voice_agents", "leads");
+voiceInsightsRouter.use((req, res, next) => {
+  if (req.path.startsWith("/summary")) return summaryTab(req, res, next);
+  if (req.path.startsWith("/callbacks")) return callbacksTab(req, res, next);
+  return leadsTab(req, res, next);
+});
 
 const CALLBACK_KEYS = CALLBACK_CODES;
 

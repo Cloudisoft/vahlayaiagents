@@ -2,11 +2,13 @@ import { Router } from "express";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { requireModuleAccess } from "../middleware/moduleAccess.js";
+import { requireTab } from "../services/accessService.js";
 import { syncCartesiaVoices } from "../services/cartesiaService.js";
 
 export const voicesRouter = Router();
 voicesRouter.use(requireAuth);
 voicesRouter.use(requireModuleAccess("voice_agents"));
+voicesRouter.use(requireTab("voice_agents", "voices", { readVia: ["agents", "campaigns"] }));
 
 voicesRouter.get("/", async (_req, res) => {
   const result = await pool.query("select * from voices order by provider, name");

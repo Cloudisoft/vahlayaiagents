@@ -92,8 +92,8 @@ export async function signup(params: {
     const roleId = roleResult.rows[0].id;
 
     const userResult = await client.query<{ id: string }>(
-      `insert into users (organization_id, email, username, password_hash, first_name, last_name, role_id)
-       values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+      `insert into users (organization_id, email, username, password_hash, first_name, last_name, role_id, is_owner)
+       values ($1, $2, $3, $4, $5, $6, $7, true) returning id`,
       [organizationId, email.toLowerCase(), username, passwordHash, firstName ?? null, lastName ?? null, roleId]
     );
     const userId = userResult.rows[0].id;

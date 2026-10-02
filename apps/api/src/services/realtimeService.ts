@@ -4,6 +4,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { verifyAccessToken } from "./authService.js";
 import { subscribe, EVENTS_CHANNEL } from "./events.js";
 import { hasPermission } from "../middleware/permissions.js";
+import { canUseTab, loadAccess } from "./accessService.js";
 import { pool } from "../db/pool.js";
 
 // Two WebSocket endpoints on the API server:
@@ -16,13 +17,13 @@ const orgSockets = new Map<string, Set<WebSocket>>();
 const alive = new WeakMap<WebSocket, boolean>();
 const HEARTBEAT_MS = 25_000;
 
-function authenticate(req: IncomingMessage): { org: string; role: string; url: URL } | null {
+function authenticate(req: IncomingMessage): { org: string; role: string; sub: string; url: URL } | null {
   const url = new URL(req.url ?? "", "http://localhost");
   const token = url.searchParams.get("token");
   if (!token) return null;
   try {
     const p = verifyAccessToken(token);
-    return { org: p.org, role: p.role, url };
+    return { org: p.org, role: p.role, sub: p.sub, url };
   } catch {
     return null;
   }
@@ -89,6 +90,7 @@ async function handleListen(socket: WebSocket, req: IncomingMessage) {
   const auth = authenticate(req);
   if (!auth) return socket.close(4001, "Invalid token");
   if (!hasPermission(auth.role, "calls.listen")) return socket.close(4003, "Missing permission: calls.listen");
+  if (!canUseTab(await loadAccess(auth.sub, auth.role), "voice_agents", "live")) return socket.close(4003, "No access to Live Monitor");
   const callId = auth.url.searchParams.get("callId");
   const r = await pool.query(
     "select monitor_listen_url from calls where id = $1 and organization_id = $2 and status in ('queued','ringing','answered')",

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { requireModuleAccess } from "../middleware/moduleAccess.js";
+import { requireTab } from "../services/accessService.js";
 import { requireRole } from "../middleware/rbac.js";
 import { getTelephonyProvider } from "../telephony/index.js";
 import { TwilioProvider } from "../telephony/TwilioProvider.js";
@@ -16,6 +17,7 @@ import {
 export const phoneNumbersRouter = Router();
 phoneNumbersRouter.use(requireAuth);
 phoneNumbersRouter.use(requireModuleAccess("voice_agents"));
+phoneNumbersRouter.use(requireTab("voice_agents", "numbers", { readVia: ["campaigns"] }));
 phoneNumbersRouter.use(requireRole("agent_manager"));
 
 phoneNumbersRouter.get("/", async (req: AuthedRequest, res) => {

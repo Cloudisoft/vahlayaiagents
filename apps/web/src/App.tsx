@@ -100,7 +100,7 @@ function AppShell() {
         {!isHome && (
           <div className="max-w-6xl mx-auto px-6 pt-4">
             <Link to="/" className="text-sm text-slate-500 hover:text-red-600">
-              ← Back to Dashboard
+              ← Back to Home
             </Link>
           </div>
         )}

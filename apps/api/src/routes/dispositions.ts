@@ -3,6 +3,7 @@ import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { requireModuleAccess } from "../middleware/moduleAccess.js";
+import { requireTab } from "../services/accessService.js";
 import { ensureDefaultDispositions } from "../services/dispositionsService.js";
 import { requirePermission } from "../middleware/permissions.js";
 
@@ -11,6 +12,9 @@ const COLORS = ["red", "amber", "green", "blue", "slate", "purple", "teal"] as c
 export const dispositionsRouter = Router();
 dispositionsRouter.use(requireAuth);
 dispositionsRouter.use(requireModuleAccess("voice_agents"));
+// Everyone in Voice AI reads the codes; changing them needs the Dispositions tab.
+const dispositionsTab = requireTab("voice_agents", "dispositions");
+dispositionsRouter.use((req, res, next) => (req.method === "GET" ? next() : dispositionsTab(req, res, next)));
 
 dispositionsRouter.get("/", async (req: AuthedRequest, res) => {
   await ensureDefaultDispositions(req.auth!.organizationId);

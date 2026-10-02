@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { Link, Navigate, NavLink, useLocation } from "react-router-dom";
+import { useAuth } from "../context/AuthContext.js";
 import { fetchCached, prefetch } from "../lib/useApi.js";
 import { ROUTE_DATA, summaryKey } from "../lib/voiceKeys.js";
 import { useOrgEvents } from "../lib/voice.js";
@@ -70,8 +71,20 @@ function Icon({ d }: { d: string }) {
   );
 }
 
+// "/voice" -> "dashboard", "/voice/campaigns/123" -> "campaigns"
+function tabOf(path: string): string {
+  const seg = path.replace(/^\/voice\/?/, "").split("/")[0];
+  return seg === "" ? "dashboard" : seg === "history" ? "history" : seg;
+}
+
 export default function VoiceLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const { user } = useAuth();
+  const off = new Set(user?.full_access ? [] : (user?.disabled_tabs ?? []));
+  const allowed = (to: string) => !off.has(`voice_agents.${tabOf(to)}`);
+  const sections = SECTIONS.map((s) => ({ ...s, items: s.items.filter((it) => allowed(it.to)) })).filter((s) => s.items.length > 0);
+  const currentAllowed = allowed(location.pathname);
+  const firstAllowed = sections[0]?.items[0]?.to;
   const [open, setOpen] = useState(false);
   const [live, setLive] = useState(0);
   const [dueCallbacks, setDueCallbacks] = useState(0);
@@ -98,7 +111,7 @@ export default function VoiceLayout({ children }: { children: ReactNode }) {
 
   const nav = (
     <nav className="space-y-5">
-      {SECTIONS.map((s) => (
+      {sections.map((s) => (
         <div key={s.title}>
           <div className="px-3 mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{s.title}</div>
           <div className="space-y-0.5">
@@ -146,7 +159,21 @@ export default function VoiceLayout({ children }: { children: ReactNode }) {
           </button>
           {open && <div className="mt-3 pb-2">{nav}</div>}
         </div>
-        <main className="px-4 sm:px-8 py-6">{children}</main>
+        <main className="px-4 sm:px-8 py-6">
+          <Link to="/" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-red-600 mb-4">
+            ← Back to Home
+          </Link>
+          {currentAllowed ? (
+            children
+          ) : location.pathname === "/voice" && firstAllowed ? (
+            <Navigate to={firstAllowed} replace />
+          ) : (
+            <div className="max-w-lg bg-white border border-slate-200 rounded-xl p-6 animate-pop-in">
+              <div className="font-semibold text-slate-900">You don't have access to this page</div>
+              <p className="text-sm text-slate-500 mt-1">Ask your admin to turn it on for you in the Admin Panel.</p>
+            </div>
+          )}
+        </main>
       </div>
     </div>
   );

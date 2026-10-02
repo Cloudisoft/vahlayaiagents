@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { permissionsFor } from "../middleware/permissions.js";
+import { loadAccess } from "../services/accessService.js";
 import { z } from "zod";
 import {
   createSession,
@@ -112,7 +113,7 @@ authRouter.post("/reset-password", async (req, res) => {
 // browser needs no separate /me round trip.
 async function loadProfile(userId: string) {
   const result = await pool.query(
-    `select u.id, u.email, u.username, u.first_name, u.last_name, u.organization_id, r.key as role,
+    `select u.id, u.email, u.username, u.first_name, u.last_name, u.organization_id, r.key as role, u.is_owner,
             o.name as organization_name, o.settings as organization_settings,
             coalesce(array_agg(uma.module_key) filter (where uma.enabled), '{}') as enabled_modules
      from users u
@@ -124,7 +125,15 @@ async function loadProfile(userId: string) {
     [userId]
   );
   const user = result.rows[0];
-  return user ? { ...user, permissions: permissionsFor(user.role) } : null;
+  if (!user) return null;
+  const access = await loadAccess(user.id, user.role);
+  return {
+    ...user,
+    permissions: permissionsFor(user.role),
+    full_access: access.full,
+    enabled_modules: [...access.modules],
+    disabled_tabs: [...access.disabledTabs],
+  };
 }
 
 authRouter.get("/me", requireAuth, async (req: AuthedRequest, res) => {

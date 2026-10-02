@@ -4,6 +4,7 @@ import { stringify } from "csv-stringify/sync";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { requireModuleAccess } from "../middleware/moduleAccess.js";
+import { requireTab } from "../services/accessService.js";
 import { requirePermission } from "../middleware/permissions.js";
 import { getStorageDriver } from "../services/storageService.js";
 import { controlVapiCall } from "../voiceai/vapiClient.js";
@@ -15,6 +16,15 @@ import { DNC_CODES } from "../services/dispositionsService.js";
 export const callsRouter = Router();
 callsRouter.use(requireAuth);
 callsRouter.use(requireModuleAccess("voice_agents"));
+// One router, three tabs: live controls, the DNC list, and call records.
+const liveTab = requireTab("voice_agents", "live");
+const dncTab = requireTab("voice_agents", "dnc");
+const historyTab = requireTab("voice_agents", "history", { readVia: ["leads"] });
+callsRouter.use((req, res, next) => {
+  if (req.path.startsWith("/dnc")) return dncTab(req, res, next);
+  if (req.path === "/active" || /^\/[^/]+\/(whisper|barge|transfer|end)$/.test(req.path)) return liveTab(req, res, next);
+  return historyTab(req, res, next);
+});
 
 const LIVE = ["queued", "ringing", "answered"];
 

@@ -1,4 +1,7 @@
 import express from "express";
+// Route handlers are async; this makes Express 4 send their errors to the
+// error handler below instead of crashing the process.
+import "express-async-errors";
 import http from "node:http";
 import path from "node:path";
 import { existsSync } from "node:fs";
@@ -99,7 +102,11 @@ if (existsSync(webDist)) {
   });
 }
 
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: Error & { code?: string }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  // Malformed ids/values from the client (bad uuid, enum, number…) are 400s.
+  if (err.code && ["22P02", "22007", "22008", "22003", "23502", "23503"].includes(err.code)) {
+    return res.status(400).json({ error: "Invalid request." });
+  }
   console.error(err);
   res.status(500).json({ error: env.nodeEnv === "production" ? "Internal server error." : err.message });
 });
