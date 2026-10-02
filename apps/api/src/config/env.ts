@@ -18,6 +18,12 @@ export const env = {
   apiUrl: optional("API_URL") ?? `http://localhost:${Number(optional("PORT") ?? "4000")}`,
 
   databaseUrl: required("DATABASE_URL"),
+  // Session/direct connection for LISTEN/NOTIFY and migrations. Supabase's
+  // transaction pooler (port 6543) can't hold a LISTEN; defaults to DATABASE_URL.
+  databaseDirectUrl: optional("DATABASE_DIRECT_URL") ?? required("DATABASE_URL"),
+  // PEM of the database server's CA (Supabase: Project Settings → Database → SSL certificate).
+  databaseCaCert: optional("DATABASE_CA_CERT"),
+  databasePoolMax: Number(optional("DATABASE_POOL_MAX") ?? "15"),
 
   jwtSecret: optional("JWT_SECRET"),
   jwtAccessTtl: optional("JWT_ACCESS_TTL") ?? "15m",

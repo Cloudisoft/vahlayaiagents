@@ -1,352 +1,128 @@
-import { Link, Route, Routes, useLocation } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { Link, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import Login from "./pages/Login.js";
-import Signup from "./pages/Signup.js";
-import ForgotPassword from "./pages/ForgotPassword.js";
-import ResetPassword from "./pages/ResetPassword.js";
-import Dashboard from "./pages/Dashboard.js";
-import Settings from "./pages/Settings.js";
-import Usage from "./pages/Usage.js";
-import Profile from "./pages/Profile.js";
-import AdminPanel from "./pages/AdminPanel.js";
-import ApplyPublic from "./pages/ApplyPublic.js";
-import JobsList from "./pages/hr/JobsList.js";
-import JobNew from "./pages/hr/JobNew.js";
-import JobDetail from "./pages/hr/JobDetail.js";
-import ApplicationDetail from "./pages/hr/ApplicationDetail.js";
-import CoverageHome from "./pages/coverage/CoverageHome.js";
-import LeadGenHome from "./pages/leadgen/LeadGenHome.js";
-import VoiceHome from "./pages/voice/VoiceHome.js";
-import AgentNew from "./pages/voice/AgentNew.js";
-import CampaignNew from "./pages/voice/CampaignNew.js";
-import CampaignDetail from "./pages/voice/CampaignDetail.js";
-import LiveCalls from "./pages/voice/LiveCalls.js";
-import CallHistory from "./pages/voice/CallHistory.js";
-import AuditorHome from "./pages/auditor/AuditorHome.js";
-import VoiceDashboard from "./pages/voice/VoiceDashboard.js";
-import Analytics from "./pages/voice/Analytics.js";
-import Callbacks from "./pages/voice/Callbacks.js";
-import VoiceLeads from "./pages/voice/VoiceLeads.js";
-import Dispositions from "./pages/voice/Dispositions.js";
-import VoiceLayout from "./components/VoiceLayout.js";
 import ProtectedRoute from "./components/ProtectedRoute.js";
 import Navbar from "./components/Navbar.js";
+import VoiceLayout from "./components/VoiceLayout.js";
 
-function AppShell({ children }: { children: React.ReactNode }) {
+// Pages load on demand so the first screen ships only what it needs.
+const Signup = lazy(() => import("./pages/Signup.js"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword.js"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword.js"));
+const ApplyPublic = lazy(() => import("./pages/ApplyPublic.js"));
+const Dashboard = lazy(() => import("./pages/Dashboard.js"));
+const Settings = lazy(() => import("./pages/Settings.js"));
+const Usage = lazy(() => import("./pages/Usage.js"));
+const Profile = lazy(() => import("./pages/Profile.js"));
+const AdminPanel = lazy(() => import("./pages/AdminPanel.js"));
+const JobsList = lazy(() => import("./pages/hr/JobsList.js"));
+const JobNew = lazy(() => import("./pages/hr/JobNew.js"));
+const JobDetail = lazy(() => import("./pages/hr/JobDetail.js"));
+const ApplicationDetail = lazy(() => import("./pages/hr/ApplicationDetail.js"));
+const CoverageHome = lazy(() => import("./pages/coverage/CoverageHome.js"));
+const LeadGenHome = lazy(() => import("./pages/leadgen/LeadGenHome.js"));
+const VoiceDashboard = lazy(() => import("./pages/voice/VoiceDashboard.js"));
+const VoiceHome = lazy(() => import("./pages/voice/VoiceHome.js"));
+const AgentNew = lazy(() => import("./pages/voice/AgentNew.js"));
+const CampaignNew = lazy(() => import("./pages/voice/CampaignNew.js"));
+const CampaignDetail = lazy(() => import("./pages/voice/CampaignDetail.js"));
+const Callbacks = lazy(() => import("./pages/voice/Callbacks.js"));
+const LiveCalls = lazy(() => import("./pages/voice/LiveCalls.js"));
+const VoiceLeads = lazy(() => import("./pages/voice/VoiceLeads.js"));
+const CallHistory = lazy(() => import("./pages/voice/CallHistory.js"));
+const Analytics = lazy(() => import("./pages/voice/Analytics.js"));
+const Dispositions = lazy(() => import("./pages/voice/Dispositions.js"));
+const AuditorHome = lazy(() => import("./pages/auditor/AuditorHome.js"));
+
+function PageFallback() {
+  return <div className="h-1 w-full overflow-hidden"><div className="h-1 w-1/3 bg-red-500/60 animate-pulse" /></div>;
+}
+
+// Layout routes stay mounted while you move between their pages, so the
+// navbar, sidebar and their live counters never reload or flicker.
+function AppShell() {
   const location = useLocation();
   const isHome = location.pathname === "/";
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Navbar />
-      {!isHome && (
-        <div className="max-w-6xl mx-auto px-6 pt-4">
-          <Link to="/" className="text-sm text-slate-500 hover:text-red-600">
-            ← Back to Dashboard
-          </Link>
-        </div>
-      )}
-      <main className="max-w-6xl mx-auto p-6">{children}</main>
-    </div>
+    <ProtectedRoute>
+      <div className="min-h-screen bg-slate-50">
+        <Navbar />
+        {!isHome && (
+          <div className="max-w-6xl mx-auto px-6 pt-4">
+            <Link to="/" className="text-sm text-slate-500 hover:text-red-600">
+              ← Back to Dashboard
+            </Link>
+          </div>
+        )}
+        <main className="max-w-6xl mx-auto p-6">
+          <Suspense fallback={<PageFallback />}>
+            <Outlet />
+          </Suspense>
+        </main>
+      </div>
+    </ProtectedRoute>
   );
 }
 
-function VoiceShell({ children }: { children: React.ReactNode }) {
+function VoiceShell() {
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Navbar />
-      <VoiceLayout>{children}</VoiceLayout>
-    </div>
+    <ProtectedRoute>
+      <div className="min-h-screen bg-slate-50">
+        <Navbar />
+        <VoiceLayout>
+          <Suspense fallback={<PageFallback />}>
+            <Outlet />
+          </Suspense>
+        </VoiceLayout>
+      </div>
+    </ProtectedRoute>
   );
 }
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/signup" element={<Signup />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
-      <Route path="/apply/:slug" element={<ApplyPublic />} />
+    <Suspense fallback={<PageFallback />}>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/apply/:slug" element={<ApplyPublic />} />
 
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <AppShell>
-              <Dashboard />
-            </AppShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/hr"
-        element={
-          <ProtectedRoute>
-            <AppShell>
-              <JobsList />
-            </AppShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/hr/jobs/new"
-        element={
-          <ProtectedRoute>
-            <AppShell>
-              <JobNew />
-            </AppShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/hr/jobs/:id"
-        element={
-          <ProtectedRoute>
-            <AppShell>
-              <JobDetail />
-            </AppShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/hr/applications/:id"
-        element={
-          <ProtectedRoute>
-            <AppShell>
-              <ApplicationDetail />
-            </AppShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/coverage"
-        element={
-          <ProtectedRoute>
-            <AppShell>
-              <CoverageHome />
-            </AppShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/leadgen"
-        element={
-          <ProtectedRoute>
-            <AppShell>
-              <LeadGenHome />
-            </AppShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <VoiceDashboard />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/campaigns"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <VoiceHome tab="campaigns" />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/campaigns/new"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <CampaignNew />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/campaigns/:id"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <CampaignDetail />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/callbacks"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <Callbacks />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/live"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <LiveCalls />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/leads"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <VoiceLeads />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/history"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <CallHistory />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/analytics"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <Analytics />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/dispositions"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <Dispositions />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/auditor"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <AuditorHome />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/agents"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <VoiceHome tab="agents" />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/agents/new"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <AgentNew />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/agents/:id"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <AgentNew />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/voices"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <VoiceHome tab="voices" />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/numbers"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <VoiceHome tab="numbers" />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/dnc"
-        element={
-          <ProtectedRoute>
-            <VoiceShell>
-              <VoiceHome tab="dnc" />
-            </VoiceShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/settings"
-        element={
-          <ProtectedRoute>
-            <AppShell>
-              <Settings />
-            </AppShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/usage"
-        element={
-          <ProtectedRoute>
-            <AppShell>
-              <Usage />
-            </AppShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/profile"
-        element={
-          <ProtectedRoute>
-            <AppShell>
-              <Profile />
-            </AppShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/admin"
-        element={
-          <ProtectedRoute>
-            <AppShell>
-              <AdminPanel />
-            </AppShell>
-          </ProtectedRoute>
-        }
-      />
-    </Routes>
+        <Route element={<AppShell />}>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/hr" element={<JobsList />} />
+          <Route path="/hr/jobs/new" element={<JobNew />} />
+          <Route path="/hr/jobs/:id" element={<JobDetail />} />
+          <Route path="/hr/applications/:id" element={<ApplicationDetail />} />
+          <Route path="/coverage" element={<CoverageHome />} />
+          <Route path="/leadgen" element={<LeadGenHome />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/usage" element={<Usage />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/admin" element={<AdminPanel />} />
+        </Route>
+
+        <Route path="/voice" element={<VoiceShell />}>
+          <Route index element={<VoiceDashboard />} />
+          <Route path="campaigns" element={<VoiceHome tab="campaigns" />} />
+          <Route path="campaigns/new" element={<CampaignNew />} />
+          <Route path="campaigns/:id" element={<CampaignDetail />} />
+          <Route path="callbacks" element={<Callbacks />} />
+          <Route path="live" element={<LiveCalls />} />
+          <Route path="leads" element={<VoiceLeads />} />
+          <Route path="history" element={<CallHistory />} />
+          <Route path="analytics" element={<Analytics />} />
+          <Route path="dispositions" element={<Dispositions />} />
+          <Route path="auditor" element={<AuditorHome />} />
+          <Route path="agents" element={<VoiceHome key="agents" tab="agents" />} />
+          <Route path="agents/new" element={<AgentNew />} />
+          <Route path="agents/:id" element={<AgentNew />} />
+          <Route path="voices" element={<VoiceHome key="voices" tab="voices" />} />
+          <Route path="numbers" element={<VoiceHome key="numbers" tab="numbers" />} />
+          <Route path="dnc" element={<VoiceHome key="dnc" tab="dnc" />} />
+        </Route>
+      </Routes>
+    </Suspense>
   );
 }

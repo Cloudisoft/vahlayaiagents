@@ -1,7 +1,12 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { pool } from "./pool.js";
+import pg from "pg";
+import { env } from "../config/env.js";
+import { pgConfig } from "./config.js";
+
+// DDL goes over the direct/session connection, never the transaction pooler.
+const pool = new pg.Pool({ ...pgConfig(env.databaseDirectUrl), max: 1 });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDir = path.join(__dirname, "..", "..", "migrations");

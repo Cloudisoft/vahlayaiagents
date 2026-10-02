@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../../lib/api.js";
+import { prefetch, useApi } from "../../lib/useApi.js";
+import { K } from "../../lib/voiceKeys.js";
 import { StatusPill, btnDark, btnGhost, btnPrimary, formatPhone, formatSeconds, inputCls } from "../../lib/voice.js";
 
 type Tab = "campaigns" | "agents" | "voices" | "numbers" | "dnc";
@@ -70,12 +72,22 @@ interface Template {
 
 export default function VoiceHome({ tab }: { tab: Tab }) {
   const navigate = useNavigate();
-  const [templates, setTemplates] = useState<Template[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [voices, setVoices] = useState<Voice[]>([]);
-  const [numbers, setNumbers] = useState<PhoneNumber[]>([]);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [dnc, setDnc] = useState<Array<{ id: string; phone_e164: string; reason: string | null; created_at: string }>>([]);
+  type DncEntry = { id: string; phone_e164: string; reason: string | null; created_at: string };
+  // Each page fetches only what it shows; cached data renders instantly.
+  const agentsQ = useApi<{ agents: Agent[] }>(tab === "agents" ? K.agents : null);
+  const templatesQ = useApi<{ templates: Template[] }>(tab === "agents" || tab === "campaigns" ? K.templates : null);
+  const voicesQ = useApi<{ voices: Voice[] }>(tab === "voices" ? K.voices : null);
+  const numbersQ = useApi<{ phoneNumbers: PhoneNumber[] }>(tab === "numbers" ? K.numbers : null);
+  const campaignsQ = useApi<{ campaigns: Campaign[] }>(tab === "campaigns" ? K.campaigns : null);
+  const dncQ = useApi<{ entries: DncEntry[] }>(tab === "dnc" ? K.dnc : null);
+  const templates = templatesQ.data?.templates ?? [];
+  const agents = agentsQ.data?.agents ?? [];
+  const voices = voicesQ.data?.voices ?? [];
+  const numbers = numbersQ.data?.phoneNumbers ?? [];
+  const campaigns = campaignsQ.data?.campaigns ?? [];
+  const dnc = dncQ.data?.entries ?? [];
+  const loading = [agentsQ, voicesQ, numbersQ, campaignsQ, dncQ].some((q) => q.loading);
+  const loadError = [agentsQ, voicesQ, numbersQ, campaignsQ, dncQ].map((q) => q.error).find(Boolean) ?? null;
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -86,23 +98,9 @@ export default function VoiceHome({ tab }: { tab: Tab }) {
   const [dncPhone, setDncPhone] = useState("");
 
   async function loadAll() {
-    const [a, v, n, c, d] = await Promise.all([
-      api<{ agents: Agent[] }>("/voice/agents"),
-      api<{ voices: Voice[] }>("/voice/voices"),
-      api<{ phoneNumbers: PhoneNumber[] }>("/voice/phone-numbers"),
-      api<{ campaigns: Campaign[] }>("/voice/campaigns"),
-      api<{ entries: typeof dnc }>("/voice/calls/dnc/list"),
-    ]);
-    setAgents(a.agents);
-    setVoices(v.voices);
-    setNumbers(n.phoneNumbers);
-    setCampaigns(c.campaigns);
-    setDnc(d.entries);
+    const reloads = { agents: agentsQ, voices: voicesQ, numbers: numbersQ, campaigns: campaignsQ, dnc: dncQ } as const;
+    await reloads[tab].reload();
   }
-
-  useEffect(() => {
-    loadAll().catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load."));
-  }, []);
 
   async function run(key: string, fn: () => Promise<string | void>) {
     setError(null);
@@ -119,9 +117,6 @@ export default function VoiceHome({ tab }: { tab: Tab }) {
     }
   }
 
-  useEffect(() => {
-    api<{ templates: Template[] }>("/voice/agents/templates").then((r) => setTemplates(r.templates));
-  }, []);
 
   async function useTemplate(key: string) {
     await run("template", async () => {
@@ -156,6 +151,8 @@ export default function VoiceHome({ tab }: { tab: Tab }) {
     <div className="max-w-6xl space-y-6">
       <h1 className="text-2xl font-semibold text-slate-900">{TITLES[tab]}</h1>
 
+      {loading && <div className="text-sm text-slate-400">Loading…</div>}
+      {loadError && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{loadError}</div>}
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
       {message && <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-2">{message}</div>}
 
@@ -166,7 +163,7 @@ export default function VoiceHome({ tab }: { tab: Tab }) {
           </div>
           <div className="grid md:grid-cols-2 gap-4">
             {campaigns.map((c) => (
-              <Link key={c.id} to={`/voice/campaigns/${c.id}`} className="bg-white border border-slate-200 rounded-xl p-4 hover:border-red-300">
+              <Link key={c.id} to={`/voice/campaigns/${c.id}`} onMouseEnter={() => prefetch(K.campaign(c.id))} className="bg-white border border-slate-200 rounded-xl p-4 hover:border-red-300">
                 <div className="flex justify-between items-center mb-1">
                   <span className="font-medium text-slate-900">{c.name}</span>
                   <StatusPill status={c.status} />

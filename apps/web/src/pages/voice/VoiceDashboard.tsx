@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../../lib/api.js";
+import { invalidate, useApi } from "../../lib/useApi.js";
+import { K, summaryKey } from "../../lib/voiceKeys.js";
 import { StatusPill, btnPrimary, formatPhone, formatSeconds, useOrgEvents } from "../../lib/voice.js";
 import BarChart from "../../components/BarChart.js";
-import { StatTile, loadSummary, pct, type Summary } from "./Analytics.js";
+import { StatTile, pct, type Summary } from "./Analytics.js";
 
 interface Campaign {
   id: string;
@@ -28,33 +28,21 @@ interface Callback {
 }
 
 export default function VoiceDashboard() {
-  const [today, setToday] = useState<Summary | null>(null);
-  const [week, setWeek] = useState<Summary | null>(null);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [callbacks, setCallbacks] = useState<Callback[]>([]);
-  const [denied, setDenied] = useState(false);
+  const campaignsQ = useApi<{ campaigns: Campaign[] }>(K.campaigns);
+  const callbacksQ = useApi<{ callbacks: Callback[] }>(K.callbacks());
+  const todayQ = useApi<Summary>(summaryKey(1), { refreshMs: 30_000 });
+  const weekQ = useApi<Summary>(summaryKey(7));
+  const today = todayQ.data;
+  const week = weekQ.data;
+  const campaigns = campaignsQ.data?.campaigns ?? [];
+  const callbacks = (callbacksQ.data?.callbacks ?? []).slice(0, 6);
+  const denied = Boolean(todayQ.error);
 
-  const load = useCallback(async () => {
-    const [c, cb] = await Promise.all([
-      api<{ campaigns: Campaign[] }>("/voice/campaigns").catch(() => ({ campaigns: [] })),
-      api<{ callbacks: Callback[] }>("/voice/insights/callbacks").catch(() => ({ callbacks: [] })),
-    ]);
-    setCampaigns(c.campaigns);
-    setCallbacks(cb.callbacks.slice(0, 6));
-    try {
-      const [t, w] = await Promise.all([loadSummary(1), loadSummary(7)]);
-      setToday(t);
-      setWeek(w);
-    } catch {
-      setDenied(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
   useOrgEvents((e) => {
-    if (e.type === "call_ended" || e.type === "campaign_status") load();
+    if (e.type === "call_ended" || e.type === "campaign_status") {
+      invalidate("/voice/insights");
+      invalidate(K.campaigns);
+    }
   });
 
   const t = today?.totals;

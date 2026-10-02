@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { api, ApiError } from "../../lib/api.js";
+import { useState } from "react";
+import { useApi } from "../../lib/useApi.js";
+import { K, summaryKey } from "../../lib/voiceKeys.js";
 import BarChart from "../../components/BarChart.js";
 import { DispositionBadge, formatSeconds, inputCls } from "../../lib/voice.js";
 
@@ -26,7 +27,6 @@ export interface Summary {
 }
 
 export const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : "—");
-const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 export function StatTile({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
@@ -38,11 +38,6 @@ export function StatTile({ label, value, sub }: { label: string; value: string |
   );
 }
 
-export function loadSummary(days: number, campaignId = "") {
-  const q = new URLSearchParams({ days: String(days), tz: TZ });
-  if (campaignId) q.set("campaignId", campaignId);
-  return api<Summary>(`/voice/insights/summary?${q}`);
-}
 
 function hourLabel(h: number) {
   return `${h % 12 || 12}${h < 12 ? "a" : "p"}`;
@@ -51,18 +46,11 @@ function hourLabel(h: number) {
 export default function Analytics() {
   const [days, setDays] = useState(7);
   const [campaignId, setCampaignId] = useState("");
-  const [campaigns, setCampaigns] = useState<Array<{ id: string; name: string }>>([]);
-  const [data, setData] = useState<Summary | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api<{ campaigns: Array<{ id: string; name: string }> }>("/voice/campaigns").then((r) => setCampaigns(r.campaigns));
-  }, []);
-  useEffect(() => {
-    loadSummary(days, campaignId)
-      .then(setData)
-      .catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load analytics."));
-  }, [days, campaignId]);
+  const campaignsQ = useApi<{ campaigns: Array<{ id: string; name: string }> }>(K.campaigns);
+  const summaryQ = useApi<Summary>(summaryKey(days, campaignId));
+  const campaigns = campaignsQ.data?.campaigns ?? [];
+  const data = summaryQ.data ?? null;
+  const error = summaryQ.error;
 
   const t = data?.totals;
   const maxDisp = Math.max(1, ...(data?.dispositions.map((d) => d.count) ?? [1]));

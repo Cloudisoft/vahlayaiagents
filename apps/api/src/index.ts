@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
+import compression from "compression";
 import { env } from "./config/env.js";
 import { authRouter } from "./routes/auth.js";
 import { orgRouter } from "./routes/org.js";
@@ -49,6 +50,7 @@ app.use(
   })
 );
 app.use(cors({ origin: env.appUrl, credentials: true }));
+app.use(compression());
 app.use(cookieParser());
 
 app.get("/api/health", (_req, res) => res.json({ status: "ok", timestamp: new Date().toISOString() }));
@@ -86,8 +88,14 @@ app.use("/api/notifications", notificationsRouter);
 // refresh cookie and the /ws sockets need no CORS).
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");
 if (existsSync(webDist)) {
+  // Vite fingerprints everything under /assets, so it can be cached forever;
+  // index.html must always be revalidated so new deploys show up at once.
+  app.use("/assets", express.static(path.join(webDist, "assets"), { immutable: true, maxAge: "365d", index: false }));
   app.use(express.static(webDist, { index: false, maxAge: "1h" }));
-  app.get(/^\/(?!api\/|ws).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
+  app.get(/^\/(?!api\/|ws).*/, (_req, res) => {
+    res.setHeader("Cache-Control", "no-cache");
+    res.sendFile(path.join(webDist, "index.html"));
+  });
 }
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

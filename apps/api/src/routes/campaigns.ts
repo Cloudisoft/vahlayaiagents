@@ -105,27 +105,47 @@ async function loadCampaign(id: string, organizationId: string) {
   return r.rows[0] ?? null;
 }
 
-const STATS_SQL = `
-  (select count(*) from campaign_leads where campaign_id = c.id)::int as total_leads,
-  (select count(*) from campaign_leads where campaign_id = c.id and status in ('queued','retry_scheduled'))::int as leads_remaining,
-  (select count(*) from campaign_leads where campaign_id = c.id and status = 'dialing')::int as leads_dialing,
-  (select count(*) from calls where campaign_id = c.id)::int as total_calls,
-  (select count(*) from calls where campaign_id = c.id and status in ('queued','ringing','answered'))::int as live_calls,
-  (select count(*) from calls where campaign_id = c.id and answered)::int as connected_calls,
-  (select count(*) from calls ca join call_dispositions cd on cd.id = ca.disposition_id
-     where ca.campaign_id = c.id and cd.key in ('FL','PROPO','XFER','SALE'))::int as interested_leads,
-  (select count(*) from calls ca join call_dispositions cd on cd.id = ca.disposition_id
-     where ca.campaign_id = c.id and cd.key = 'CALLBK')::int as appointments,
-  (select count(*) from calls ca join call_dispositions cd on cd.id = ca.disposition_id
-     where ca.campaign_id = c.id and cd.key = 'XFER')::int as transfers,
-  (select count(*) from calls where campaign_id = c.id and voicemail_detected)::int as voicemails,
-  (select round(avg(talk_seconds)) from calls where campaign_id = c.id and talk_seconds > 0)::int as avg_talk_seconds,
-  (select version from campaign_versions where id = c.published_version_id) as published_version`;
+// One aggregate pass over campaign_leads and one over calls per campaign
+// (lateral joins), instead of a dozen correlated sub-queries.
+const STATS_SELECT = `
+  coalesce(cls.total_leads, 0)::int as total_leads,
+  coalesce(cls.leads_remaining, 0)::int as leads_remaining,
+  coalesce(cls.leads_dialing, 0)::int as leads_dialing,
+  coalesce(cs.total_calls, 0)::int as total_calls,
+  coalesce(cs.live_calls, 0)::int as live_calls,
+  coalesce(cs.connected_calls, 0)::int as connected_calls,
+  coalesce(cs.interested_leads, 0)::int as interested_leads,
+  coalesce(cs.appointments, 0)::int as appointments,
+  coalesce(cs.transfers, 0)::int as transfers,
+  coalesce(cs.voicemails, 0)::int as voicemails,
+  cs.avg_talk_seconds::int as avg_talk_seconds,
+  cv.version as published_version`;
+
+const STATS_JOINS = `
+  left join lateral (
+    select count(*) as total_leads,
+           count(*) filter (where status in ('queued','retry_scheduled')) as leads_remaining,
+           count(*) filter (where status = 'dialing') as leads_dialing
+    from campaign_leads where campaign_id = c.id
+  ) cls on true
+  left join lateral (
+    select count(*) as total_calls,
+           count(*) filter (where ca.status in ('queued','ringing','answered')) as live_calls,
+           count(*) filter (where ca.answered) as connected_calls,
+           count(*) filter (where cd.key in ('FL','PROPO','XFER','SALE')) as interested_leads,
+           count(*) filter (where cd.key = 'CALLBK') as appointments,
+           count(*) filter (where cd.key = 'XFER') as transfers,
+           count(*) filter (where ca.voicemail_detected) as voicemails,
+           round(avg(ca.talk_seconds) filter (where ca.talk_seconds > 0)) as avg_talk_seconds
+    from calls ca left join call_dispositions cd on cd.id = ca.disposition_id
+    where ca.campaign_id = c.id
+  ) cs on true
+  left join campaign_versions cv on cv.id = c.published_version_id`;
 
 campaignsRouter.get("/", async (req: AuthedRequest, res) => {
   const result = await pool.query(
-    `select c.*, a.name as agent_name, ${STATS_SQL}
-     from campaigns c left join ai_agents a on a.id = c.ai_agent_id
+    `select c.*, a.name as agent_name, ${STATS_SELECT}
+     from campaigns c left join ai_agents a on a.id = c.ai_agent_id ${STATS_JOINS}
      where c.organization_id = $1 order by c.created_at desc`,
     [req.auth!.organizationId]
   );
@@ -134,7 +154,7 @@ campaignsRouter.get("/", async (req: AuthedRequest, res) => {
 
 campaignsRouter.get("/:id", async (req: AuthedRequest, res) => {
   const result = await pool.query(
-    `select c.*, ${STATS_SQL} from campaigns c where c.id = $1 and c.organization_id = $2`,
+    `select c.*, ${STATS_SELECT} from campaigns c ${STATS_JOINS} where c.id = $1 and c.organization_id = $2`,
     [req.params.id, req.auth!.organizationId]
   );
   if (result.rows.length === 0) return res.status(404).json({ error: "Campaign not found." });

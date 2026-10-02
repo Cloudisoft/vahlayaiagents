@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, setAccessToken } from "../lib/api.js";
+import { clearApiCache } from "../lib/useApi.js";
 
 export interface CurrentUser {
   id: string;
@@ -61,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       method: "POST",
       body: { identifier, password },
     });
+    clearApiCache();
     setAccessToken(accessToken);
     setUser(user);
     await loadMe();
@@ -72,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         method: "POST",
         body: params,
       });
+      clearApiCache();
       setAccessToken(accessToken);
       setUser(user);
       await loadMe();
@@ -81,6 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await api("/auth/logout", { method: "POST" }).catch(() => undefined);
+    clearApiCache();
     setAccessToken(null);
     setUser(null);
   }, []);

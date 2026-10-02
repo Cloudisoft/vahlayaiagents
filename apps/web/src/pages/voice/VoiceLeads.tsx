@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
+import { useApi } from "../../lib/useApi.js";
+import { K } from "../../lib/voiceKeys.js";
 import { DispositionBadge, btnGhost, formatPhone, formatSeconds, inputCls } from "../../lib/voice.js";
 
 interface LeadRow {
@@ -26,22 +28,16 @@ export default function VoiceLeads() {
   const [filters, setFilters] = useState(EMPTY);
   const [applied, setApplied] = useState(EMPTY);
   const [page, setPage] = useState(1);
-  const [rows, setRows] = useState<LeadRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [codes, setCodes] = useState<Array<{ key: string; label: string }>>([]);
   const [openId, setOpenId] = useState<string | null>(null);
-
-  useEffect(() => {
-    api<{ dispositions: Array<{ key: string; label: string }> }>("/voice/dispositions").then((r) => setCodes(r.dispositions));
-  }, []);
-  useEffect(() => {
+  const listKey = (() => {
     const q = new URLSearchParams({ page: String(page) });
     for (const [k, v] of Object.entries(applied)) if (v) q.set(k, v);
-    api<{ leads: LeadRow[]; total: number }>(`/voice/insights/leads?${q}`).then((r) => {
-      setRows(r.leads);
-      setTotal(r.total);
-    });
-  }, [applied, page]);
+    return K.leads(q.toString());
+  })();
+  const leadsQ = useApi<{ leads: LeadRow[]; total: number }>(listKey);
+  const codes = useApi<{ dispositions: Array<{ key: string; label: string }> }>(K.dispositions).data?.dispositions ?? [];
+  const rows = leadsQ.data?.leads ?? [];
+  const total = leadsQ.data?.total ?? 0;
 
   return (
     <div className="max-w-6xl space-y-4">

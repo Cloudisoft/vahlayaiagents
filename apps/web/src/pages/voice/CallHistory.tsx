@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError, getAccessToken } from "../../lib/api.js";
+import { invalidate, useApi } from "../../lib/useApi.js";
+import { K } from "../../lib/voiceKeys.js";
 import { DispositionBadge, btnGhost, formatPhone, formatSeconds, inputCls, useCan } from "../../lib/voice.js";
 
 interface CallRow {
@@ -34,13 +36,9 @@ const EMPTY_FILTERS = { campaignId: "", disposition: "", direction: "", phone: "
 
 export default function CallHistory() {
   const can = useCan();
-  const [calls, setCalls] = useState<CallRow[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [applied, setApplied] = useState(EMPTY_FILTERS);
-  const [campaigns, setCampaigns] = useState<Array<{ id: string; name: string }>>([]);
-  const [dispositions, setDispositions] = useState<Disposition[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pageSize = 50;
@@ -51,27 +49,21 @@ export default function CallHistory() {
     return q;
   }
 
-  async function load() {
-    try {
-      const q = query();
-      q.set("page", String(page));
-      q.set("pageSize", String(pageSize));
-      const r = await api<{ calls: CallRow[]; total: number }>(`/voice/calls?${q}`);
-      setCalls(r.calls);
-      setTotal(r.total);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load calls.");
-    }
-  }
-
-  useEffect(() => {
-    load();
-  }, [applied, page]);
-
-  useEffect(() => {
-    api<{ campaigns: Array<{ id: string; name: string }> }>("/voice/campaigns").then((r) => setCampaigns(r.campaigns));
-    api<{ dispositions: Disposition[] }>("/voice/dispositions").then((r) => setDispositions(r.dispositions));
-  }, []);
+  const listQ = (() => {
+    const q = query();
+    q.set("page", String(page));
+    q.set("pageSize", String(pageSize));
+    return q.toString();
+  })();
+  const callsQ = useApi<{ calls: CallRow[]; total: number }>(K.calls(listQ));
+  const campaigns = useApi<{ campaigns: Array<{ id: string; name: string }> }>(K.campaigns).data?.campaigns ?? [];
+  const dispositions = useApi<{ dispositions: Disposition[] }>(K.dispositions).data?.dispositions ?? [];
+  const calls = callsQ.data?.calls ?? [];
+  const total = callsQ.data?.total ?? 0;
+  const load = () => {
+    invalidate("/voice/calls?");
+    return callsQ.reload();
+  };
 
   async function exportCsv() {
     const res = await fetch(`/api/voice/calls/export?${query()}`, {
@@ -141,7 +133,7 @@ export default function CallHistory() {
         </div>
       </form>
 
-      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
+      {(error || callsQ.error) && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error || callsQ.error}</div>}
 
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
         <table className="w-full text-sm">

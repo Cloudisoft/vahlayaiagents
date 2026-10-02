@@ -1,6 +1,7 @@
 import pg from "pg";
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
+import { pgConfig } from "../db/config.js";
 
 // Cross-process signalling over Postgres LISTEN/NOTIFY. The worker (dialer)
 // and the API (webhooks, browsers' WebSockets) are separate processes:
@@ -28,7 +29,7 @@ export function subscribe(channel: string, onMessage: (payload: string) => void)
 
   async function connect() {
     if (stopped) return;
-    client = new pg.Client({ connectionString: env.databaseUrl });
+    client = new pg.Client({ ...pgConfig(env.databaseDirectUrl), keepAlive: true });
     client.on("notification", (msg) => {
       if (msg.channel === channel && msg.payload) onMessage(msg.payload);
     });

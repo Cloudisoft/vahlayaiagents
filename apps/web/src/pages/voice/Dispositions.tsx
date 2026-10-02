@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../../lib/api.js";
+import { useApi } from "../../lib/useApi.js";
+import { K } from "../../lib/voiceKeys.js";
 import { DispositionBadge, btnDark, inputCls, useCan } from "../../lib/voice.js";
 
 interface Disposition {
@@ -19,18 +21,12 @@ const ACTIVE = new Set(["A", "B", "N", "AH", "DROP", "ERI", "MAXCAL", "TIMEOT", 
 
 export default function Dispositions() {
   const can = useCan();
-  const [rows, setRows] = useState<Disposition[]>([]);
+  const dispQ = useApi<{ dispositions: Disposition[] }>(K.dispositions);
+  const rows = dispQ.data?.dispositions ?? [];
+  const load = () => dispQ.reload();
   const [form, setForm] = useState({ label: "", color: "slate", retryable: false });
   const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
-
-  async function load() {
-    const r = await api<{ dispositions: Disposition[] }>("/voice/dispositions");
-    setRows(r.dispositions);
-  }
-  useEffect(() => {
-    load();
-  }, []);
 
   async function run(fn: () => Promise<unknown>) {
     setError(null);

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { api } from "../lib/api.js";
+import { fetchCached, prefetch } from "../lib/useApi.js";
+import { ROUTE_DATA, summaryKey } from "../lib/voiceKeys.js";
 import { useOrgEvents } from "../lib/voice.js";
 
 interface NavItem {
@@ -8,6 +9,28 @@ interface NavItem {
   label: string;
   icon: string;
   end?: boolean;
+}
+
+// Warm a page's code chunk and data on hover so the click feels instant.
+const CHUNKS: Record<string, () => Promise<unknown>> = {
+  "/voice": () => import("../pages/voice/VoiceDashboard.js"),
+  "/voice/campaigns": () => import("../pages/voice/VoiceHome.js"),
+  "/voice/callbacks": () => import("../pages/voice/Callbacks.js"),
+  "/voice/live": () => import("../pages/voice/LiveCalls.js"),
+  "/voice/leads": () => import("../pages/voice/VoiceLeads.js"),
+  "/voice/history": () => import("../pages/voice/CallHistory.js"),
+  "/voice/analytics": () => import("../pages/voice/Analytics.js"),
+  "/voice/dispositions": () => import("../pages/voice/Dispositions.js"),
+  "/voice/auditor": () => import("../pages/auditor/AuditorHome.js"),
+  "/voice/agents": () => import("../pages/voice/VoiceHome.js"),
+  "/voice/voices": () => import("../pages/voice/VoiceHome.js"),
+  "/voice/numbers": () => import("../pages/voice/VoiceHome.js"),
+  "/voice/dnc": () => import("../pages/voice/VoiceHome.js"),
+};
+
+function warm(to: string) {
+  CHUNKS[to]?.().catch(() => undefined);
+  ROUTE_DATA[to]?.().forEach(prefetch);
 }
 
 const SECTIONS: Array<{ title: string; items: NavItem[] }> = [
@@ -57,7 +80,7 @@ export default function VoiceLayout({ children }: { children: ReactNode }) {
 
   async function loadCounts() {
     try {
-      const r = await api<{ liveCalls: number; callbacksNext24h: number }>("/voice/insights/summary?days=1");
+      const r = await fetchCached<{ liveCalls: number; callbacksNext24h: number }>(summaryKey(1));
       setLive(r.liveCalls);
       setDueCallbacks(r.callbacksNext24h);
     } catch {
@@ -86,6 +109,8 @@ export default function VoiceLayout({ children }: { children: ReactNode }) {
                 key={it.to}
                 to={it.to}
                 end={it.end}
+                onMouseEnter={() => warm(it.to)}
+                onFocus={() => warm(it.to)}
                 className={({ isActive }) =>
                   `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                     isActive ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"

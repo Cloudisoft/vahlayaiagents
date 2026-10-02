@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { api, ApiError, getAccessToken } from "../../lib/api.js";
+import { fetchCached } from "../../lib/useApi.js";
 import {
   DispositionBadge,
   StatusPill,
@@ -144,7 +145,7 @@ export default function CampaignDetail() {
   const [busy, setBusy] = useState<string | null>(null);
 
   async function load() {
-    const r = await api<{ campaign: Campaign; numbers: PoolNumber[]; agentChangedSincePublish: boolean }>(`/voice/campaigns/${id}`);
+    const r = await fetchCached<{ campaign: Campaign; numbers: PoolNumber[]; agentChangedSincePublish: boolean }>(`/voice/campaigns/${id}`);
     setCampaign(r.campaign);
     setNumbers(r.numbers);
     setAgentChanged(r.agentChangedSincePublish);
@@ -496,7 +497,7 @@ export default function CampaignDetail() {
       {tab === "versions" && <VersionsTab campaignId={id!} publishedVersionId={campaign.published_version_id} />}
 
       {can("campaign.publish") && (
-        <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-slate-200 bg-white/95 backdrop-blur">
+        <div className="fixed bottom-0 left-0 lg:left-60 right-0 z-20 border-t border-slate-200 bg-white/95 backdrop-blur">
           <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
             <div className="text-sm">
               {dirty ? (

@@ -1,9 +1,12 @@
 import pg from "pg";
 import { env } from "../config/env.js";
+import { pgConfig } from "./config.js";
 
 export const pool = new pg.Pool({
-  connectionString: env.databaseUrl,
-  max: 20,
+  ...pgConfig(env.databaseUrl),
+  max: env.databasePoolMax,
+  idleTimeoutMillis: 30_000,
+  keepAlive: true,
 });
 
 export async function query<T extends pg.QueryResultRow = pg.QueryResultRow>(

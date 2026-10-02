@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../../lib/api.js";
+import { useApi } from "../../lib/useApi.js";
+import { K } from "../../lib/voiceKeys.js";
 import { StatusPill, btnGhost, formatPhone, useCan } from "../../lib/voice.js";
 
 interface Callback {
@@ -33,16 +35,10 @@ function localTime(iso: string | null, tz: string | null) {
 export default function Callbacks() {
   const can = useCan();
   const [scope, setScope] = useState<"upcoming" | "done">("upcoming");
-  const [rows, setRows] = useState<Callback[]>([]);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
-
-  async function load() {
-    const r = await api<{ callbacks: Callback[] }>(`/voice/insights/callbacks?scope=${scope}`);
-    setRows(r.callbacks);
-  }
-  useEffect(() => {
-    load();
-  }, [scope]);
+  const cbQ = useApi<{ callbacks: Callback[] }>(K.callbacks(scope));
+  const rows = cbQ.data?.callbacks ?? [];
+  const load = () => cbQ.reload();
 
   async function act(id: string, action: "call-now" | "cancel") {
     if (action === "cancel" && !confirm("Cancel this callback? The lead won't be called again by this campaign.")) return;
