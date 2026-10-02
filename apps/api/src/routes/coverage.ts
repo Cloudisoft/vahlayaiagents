@@ -5,11 +5,13 @@ import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { requireModuleAccess } from "../middleware/moduleAccess.js";
-import { getCoverageStats, lookupPhone } from "../services/coverageService.js";
-import { enqueueJob, isQueueEnabled } from "../services/queue.js";
-import { getStorageDriver, recordFile } from "../services/storageService.js";
-import { Readable } from "node:stream";
-import crypto from "node:crypto";
+import { stringify } from "csv-stringify/sync";
+import { getCoverageStats, lookupPhone, recordLookup, toLookupResult } from "../services/coverageService.js";
+import { resolveBulk } from "../services/phoneIntel/engine.js";
+import { createBulkJob, MAX_BULK } from "../services/phoneIntel/bulkJobs.js";
+import { AlreadyImportedError, startHistoricalImport } from "../services/phoneIntel/importer.js";
+import { budgetState, HARD_DAILY_CAP_USD } from "../services/phoneIntel/budget.js";
+import { requireRole } from "../middleware/rbac.js";
 
 export const coverageRouter = Router();
 coverageRouter.use(requireAuth);
@@ -41,7 +43,7 @@ coverageRouter.get("/stats", async (req: AuthedRequest, res) => {
 });
 
 coverageRouter.put("/budget", async (req: AuthedRequest, res) => {
-  const parsed = z.object({ budgetUsd: z.number().min(0) }).safeParse(req.body);
+  const parsed = z.object({ budgetUsd: z.number().min(0).max(HARD_DAILY_CAP_USD) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
   await pool.query(
     `insert into coverage_budgets (organization_id, budget_usd) values ($1, $2)
@@ -52,55 +54,149 @@ coverageRouter.put("/budget", async (req: AuthedRequest, res) => {
 });
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 80 * 1024 * 1024 } });
 
-// Bulk CSV lookup. Expects a "phone" column (case-insensitive). Runs as a
-// background job when Redis is available; otherwise processes inline
-// up to a safety cap so a request can't hang forever on a huge file.
+function phonesFromCsv(buffer: Buffer): string[] {
+  const records = parse(buffer, {
+    columns: (header: string[]) => header.map((h) => h.trim().toLowerCase()),
+    skip_empty_lines: true,
+    relax_column_count: true,
+    bom: true,
+  }) as Record<string, string>[];
+  return records.map((r) => r.phone ?? r.phone_number ?? r.number ?? r.mobile ?? "").filter(Boolean);
+}
+
+// Bulk lookup (up to 20,000 numbers). Small files are answered inline; larger
+// ones become a job the worker processes, polled via /lookup/bulk/:id.
 coverageRouter.post("/lookup/bulk", upload.single("file"), async (req: AuthedRequest, res) => {
   if (!req.file) return res.status(400).json({ error: "No CSV file provided." });
-
-  let records: Record<string, string>[];
+  let phones: string[];
   try {
-    records = parse(req.file.buffer, { columns: (header: string[]) => header.map((h) => h.trim().toLowerCase()), skip_empty_lines: true });
+    phones = phonesFromCsv(req.file.buffer);
   } catch (err) {
     return res.status(400).json({ error: `Invalid CSV: ${(err as Error).message}` });
   }
-  const phones = records.map((r) => r.phone ?? r.phone_number ?? r.number).filter(Boolean);
   if (phones.length === 0) return res.status(400).json({ error: "CSV must have a 'phone' column." });
-
-  const key = `${req.auth!.organizationId}/coverage-bulk/${crypto.randomUUID()}.csv`;
-  const stored = await getStorageDriver().put(key, Readable.from(req.file.buffer), "text/csv");
-  const fileId = await recordFile({
-    organizationId: req.auth!.organizationId,
-    ownerId: req.auth!.userId,
-    key: stored.key,
-    fileName: req.file.originalname,
-    fileType: "csv",
-    mimeType: "text/csv",
-    size: stored.size,
+  const org = req.auth!.organizationId;
+  if (phones.length <= 300) {
+    const { rows, summary } = await resolveBulk(org, phones);
+    const results = rows.map((r) => toLookupResult(r.input, r.e164, r.resolution, { budgetExceeded: summary.budgetExceeded, error: r.error }));
+    const seen = new Set<string>();
+    for (const r of results) if (r.phoneE164 && !seen.has(r.phoneE164)) { seen.add(r.phoneE164); await recordLookup(org, req.auth!.userId, r.phoneOriginal, r.phoneE164, r); }
+    return res.json({ message: `Processed ${phones.length} numbers (${summary.twilioValidations} Twilio check(s)).`, results, summary });
+  }
+  const jobId = await createBulkJob(org, req.auth!.userId, req.file.originalname, phones);
+  res.status(202).json({
+    message: `Queued ${Math.min(phones.length, MAX_BULK).toLocaleString()} numbers.${phones.length > MAX_BULK ? ` Only the first ${MAX_BULK.toLocaleString()} are processed per file.` : ""}`,
+    jobId,
   });
+});
 
-  if (isQueueEnabled()) {
-    const jobId = await enqueueJob({
-      queueName: "coverage-bulk-lookup",
-      jobType: "bulk-lookup",
-      organizationId: req.auth!.organizationId,
-      payload: { fileId, phones, requestedBy: req.auth!.userId },
-    });
-    return res.status(202).json({ message: `Queued ${phones.length} numbers for lookup.`, backgroundJobId: jobId });
-  }
+coverageRouter.get("/lookup/bulk", async (req: AuthedRequest, res) => {
+  const r = await pool.query(
+    `select id, file_name, status, total, processed, summary, error, created_at, finished_at
+     from coverage_bulk_jobs where organization_id = $1 order by created_at desc limit 20`,
+    [req.auth!.organizationId]
+  );
+  res.json({ jobs: r.rows });
+});
 
-  const CAP = 200;
-  const capped = phones.slice(0, CAP);
-  const results = [];
-  for (const phone of capped) {
-    results.push(await lookupPhone({ organizationId: req.auth!.organizationId, requestedBy: req.auth!.userId, rawPhone: phone }));
+coverageRouter.get("/lookup/bulk/:id", async (req: AuthedRequest, res) => {
+  const r = await pool.query(
+    "select id, file_name, status, total, processed, summary, error, created_at, finished_at from coverage_bulk_jobs where id = $1 and organization_id = $2",
+    [req.params.id, req.auth!.organizationId]
+  );
+  if (!r.rows[0]) return res.status(404).json({ error: "Job not found." });
+  res.json({ job: r.rows[0] });
+});
+
+coverageRouter.get("/lookup/bulk/:id/results.csv", async (req: AuthedRequest, res) => {
+  const j = await pool.query("select file_name from coverage_bulk_jobs where id = $1 and organization_id = $2", [req.params.id, req.auth!.organizationId]);
+  if (!j.rows[0]) return res.status(404).json({ error: "Job not found." });
+  const r = await pool.query(
+    `select phone_original, phone_e164, line_type, carrier, round((confidence * 100)::numeric) as confidence_pct, source, verified, twilio_used, error
+     from coverage_bulk_results where job_id = $1 order by idx`,
+    [req.params.id]
+  );
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="lookup-results-${String(req.params.id).slice(0, 8)}.csv"`);
+  res.send(stringify(r.rows, { header: true }));
+});
+
+// --- Intelligence: historical import, health and measured accuracy ---
+
+coverageRouter.post("/intelligence/import", requireRole("company_admin"), importUpload.single("file"), async (req: AuthedRequest, res) => {
+  if (!req.file) return res.status(400).json({ error: "Choose a historical lookup CSV." });
+  try {
+    const importId = await startHistoricalImport({ buffer: req.file.buffer, fileName: req.file.originalname, userId: req.auth!.userId });
+    res.status(202).json({ importId, message: "Import started. Intelligence is rebuilt when it finishes." });
+  } catch (err) {
+    if (err instanceof AlreadyImportedError) return res.status(409).json({ error: err.message });
+    throw err;
   }
+});
+
+coverageRouter.get("/intelligence", async (req: AuthedRequest, res) => {
+  const org = req.auth!.organizationId;
+  const [imports, totals, trust, holdout, live, ported, budget, usage30] = await Promise.all([
+    pool.query("select id, file_name, status, rows_total, rows_valid, rows_invalid, duplicates, phones, observed_from, observed_to, error, created_at, finished_at from intel_imports order by created_at desc limit 20"),
+    pool.query(
+      `select (select count(*) from phone_observations)::int as observations, (select count(*) from phone_intelligence)::int as numbers,
+              (select count(*) from prefix_intelligence)::int as prefixes, (select count(*) from carrier_statistics)::int as carriers,
+              (select count(*) from phone_intelligence where verified)::int as twilio_verified_numbers`
+    ),
+    pool.query("select trust, count(*)::int as n, round(avg(confidence)::numeric, 3)::float as avg_confidence from prefix_intelligence group by trust"),
+    pool.query("select evaluated, correct, coverage, by_type, by_bucket, created_at from intel_quality_runs where kind = 'holdout' order by id desc limit 1"),
+    pool.query(
+      `select kind, predicted_type, count(*)::int as n, count(*) filter (where correct)::int as ok
+       from intel_quality_samples where organization_id = $1 and created_at > now() - interval '30 days' group by kind, predicted_type`,
+      [org]
+    ),
+    pool.query("select kind, count(*)::int as n from portability_events where detected_at > now() - interval '30 days' group by kind"),
+    budgetState(org),
+    pool.query(
+      `select coalesce(sum(spent_usd), 0)::float as spent, coalesce(sum(twilio_lookups + local_lookups), 0)::int as lookups,
+              coalesce(sum(twilio_lookups), 0)::int as twilio
+       from lookup_budget_days where organization_id = $1 and day > current_date - 30`,
+      [org]
+    ),
+  ]);
+  const unknownRate = await pool.query(
+    "select count(*) filter (where line_type = 'unknown' or line_type is null)::float / nullif(count(*), 0) as r from coverage_lookups where organization_id = $1 and created_at > now() - interval '30 days'",
+    [org]
+  );
+  const agg = (kind: string) => {
+    const rows = live.rows.filter((r) => r.kind === kind);
+    const n = rows.reduce((a, r) => a + r.n, 0);
+    const ok = rows.reduce((a, r) => a + r.ok, 0);
+    return {
+      samples: n,
+      accuracy: n ? ok / n : null,
+      byType: Object.fromEntries(rows.map((r) => [r.predicted_type, { samples: r.n, accuracy: r.n ? r.ok / r.n : null }])),
+    };
+  };
+  const u = usage30.rows[0];
   res.json({
-    message:
-      phones.length > CAP
-        ? `Processed first ${CAP} of ${phones.length} numbers inline (configure REDIS_URL for full background processing).`
-        : `Processed ${capped.length} numbers.`,
-    results,
+    imports: imports.rows,
+    totals: totals.rows[0],
+    prefixTrust: trust.rows,
+    holdout: holdout.rows[0] ?? null,
+    audit: agg("audit"),
+    corrections: agg("correction"),
+    portability30d: Object.fromEntries(ported.rows.map((r) => [r.kind, r.n])),
+    unknownRate30d: unknownRate.rows[0].r,
+    budgetToday: budget,
+    last30d: { spentUsd: u.spent, lookups: u.lookups, twilioLookups: u.twilio, costPer1000: u.lookups ? (u.spent / u.lookups) * 1000 : null },
   });
+});
+
+coverageRouter.put("/intelligence/price", requireRole("company_admin"), async (req: AuthedRequest, res) => {
+  const parsed = z.object({ priceUsd: z.number().min(0.0001).max(1) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Enter Twilio's per-lookup price in USD, e.g. 0.008." });
+  await pool.query(
+    `insert into coverage_budgets (organization_id, price_per_lookup_usd) values ($1, $2)
+     on conflict (organization_id) do update set price_per_lookup_usd = excluded.price_per_lookup_usd, updated_at = now()`,
+    [req.auth!.organizationId, parsed.data.priceUsd]
+  );
+  res.json({ budget: await budgetState(req.auth!.organizationId) });
 });

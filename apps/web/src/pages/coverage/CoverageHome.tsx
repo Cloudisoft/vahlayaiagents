@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, ApiError } from "../../lib/api.js";
+import { api, ApiError, getAccessToken, refreshSession } from "../../lib/api.js";
+import { useAuth } from "../../context/AuthContext.js";
 
 interface LookupResult {
   phoneOriginal: string;
@@ -11,6 +12,41 @@ interface LookupResult {
   verified: boolean;
   budgetExceeded: boolean;
   error?: string;
+  confidencePct?: number | null;
+  source?: string | null;
+  twilioUsed?: boolean;
+  prefixTrust?: string | null;
+  portabilityDetected?: boolean;
+  reasons?: string[];
+}
+
+const SOURCE_LABEL: Record<string, string> = {
+  twilio_validated: "Validated by Twilio now",
+  twilio_cache: "Twilio-validated recently",
+  phone_record: "Known number (history)",
+  prefix_intelligence: "NPA-NXX intelligence",
+  carrier_intelligence: "Carrier intelligence",
+  neighbor_prefix: "Neighbouring prefixes",
+  historical_inference: "Area-code history",
+  unknown: "No evidence",
+};
+
+interface BulkJob {
+  id: string;
+  file_name: string | null;
+  status: string;
+  total: number;
+  processed: number;
+  summary: { unique?: number; twilioValidations?: number; costUsd?: number; budgetExceeded?: boolean; bySource?: Record<string, number>; twilioSoFar?: number };
+  error: string | null;
+  created_at: string;
+}
+
+async function authedFetch(path: string, init: RequestInit = {}) {
+  const send = () => fetch(path, { ...init, credentials: "include", headers: { ...(init.headers ?? {}), Authorization: `Bearer ${getAccessToken()}` } });
+  let res = await send();
+  if (res.status === 401 && (await refreshSession())) res = await send();
+  return res;
 }
 
 interface Stats {
@@ -29,7 +65,35 @@ export default function CoverageHome() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [busy, setBusy] = useState(false);
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<BulkJob[]>([]);
+  const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  async function loadJobs() {
+    const r = await api<{ jobs: BulkJob[] }>("/coverage/lookup/bulk");
+    setJobs(r.jobs);
+    return r.jobs;
+  }
+  useEffect(() => {
+    loadJobs().catch(() => undefined);
+  }, []);
+  // Poll while a job is running.
+  useEffect(() => {
+    if (!jobs.some((j) => j.status === "queued" || j.status === "processing")) return;
+    const t = setInterval(() => loadJobs().then(() => loadStats()).catch(() => undefined), 4000);
+    return () => clearInterval(t);
+  }, [jobs]);
+
+  async function download(job: BulkJob) {
+    const res = await authedFetch(`/api/coverage/lookup/bulk/${job.id}/results.csv`);
+    if (!res.ok) return setError("Couldn't download the results.");
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `lookup-results-${(job.file_name ?? job.id).replace(/\.csv$/i, "")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   async function loadStats() {
     const { stats } = await api<{ stats: Stats }>("/coverage/stats");
@@ -65,19 +129,23 @@ export default function CoverageHome() {
     setError(null);
     const form = new FormData();
     form.append("file", file);
+    setUploading(true);
     try {
-      const res = await fetch("/api/coverage/lookup/bulk", { method: "POST", body: form, credentials: "include" });
+      const res = await authedFetch("/api/coverage/lookup/bulk", { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setBulkMessage(data.message);
-      await loadStats();
+      if (fileRef.current) fileRef.current.value = "";
+      await Promise.all([loadStats(), loadJobs()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bulk upload failed.");
+    } finally {
+      setUploading(false);
     }
   }
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="max-w-4xl space-y-6">
       <h1 className="text-2xl font-semibold text-slate-900">Vahlay Coverage</h1>
 
       {stats && (
@@ -92,6 +160,8 @@ export default function CoverageHome() {
       )}
 
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
+
+      <IntelligencePanel />
 
       <div className="bg-white border border-slate-200 rounded-xl p-6">
         <h2 className="font-medium text-slate-900 mb-3">Single lookup</h2>
@@ -111,8 +181,18 @@ export default function CoverageHome() {
             <div><span className="text-slate-500">Normalized: </span>{result.phoneE164 || "invalid"}</div>
             <div><span className="text-slate-500">Carrier: </span>{result.predictedCarrier ?? "unknown"}</div>
             <div><span className="text-slate-500">Line type: </span>{result.lineType ?? "unknown"}</div>
-            <div><span className="text-slate-500">Status: </span>{result.verificationStatus}</div>
+            <div><span className="text-slate-500">Status: </span>{result.verificationStatus}{result.verified && <span className="ml-2 text-xs rounded-full bg-green-100 text-green-800 px-2 py-0.5">Verified</span>}</div>
             <div><span className="text-slate-500">Confidence: </span>{result.confidence !== null ? `${Math.round(result.confidence * 100)}%` : "—"}</div>
+            {result.source && (
+              <div>
+                <span className="text-slate-500">Source: </span>
+                {SOURCE_LABEL[result.source] ?? result.source}
+                {result.prefixTrust && <span className="text-xs text-slate-400"> · prefix {result.prefixTrust}</span>}
+                {result.twilioUsed && <span className="text-xs text-slate-400"> · Twilio used</span>}
+              </div>
+            )}
+            {result.portabilityDetected && <div className="text-amber-700">Ported number detected — its history said otherwise.</div>}
+            {result.reasons && result.reasons.length > 0 && <div className="text-xs text-slate-500">{result.reasons.join(" · ")}</div>}
             {result.budgetExceeded && <div className="text-amber-600">Live verification unavailable right now — showing prediction only.</div>}
             {result.error && <div className="text-red-600">{result.error}</div>}
           </div>
@@ -121,15 +201,179 @@ export default function CoverageHome() {
 
       <div className="bg-white border border-slate-200 rounded-xl p-6">
         <h2 className="font-medium text-slate-900 mb-3">Bulk CSV lookup</h2>
-        <p className="text-sm text-slate-500 mb-3">CSV must include a "phone" column.</p>
+        <p className="text-sm text-slate-500 mb-3">
+          CSV must include a "phone" column. Up to 20,000 numbers per file. Numbers are answered from history and NPA-NXX intelligence first;
+          Twilio checks are spent only where they teach the most, within the daily limit.
+        </p>
         <div className="flex gap-2 items-center">
           <input ref={fileRef} type="file" accept=".csv" className="text-sm" />
-          <button onClick={uploadBulk} className="bg-slate-900 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-slate-800">
-            Upload
+          <button onClick={uploadBulk} disabled={uploading} className="bg-slate-900 text-white text-sm font-medium rounded-md px-4 py-2 hover:bg-slate-800 disabled:opacity-50">
+            {uploading ? "Uploading…" : "Upload"}
           </button>
         </div>
         {bulkMessage && <div className="mt-3 text-sm text-green-700">{bulkMessage}</div>}
+        {jobs.length > 0 && (
+          <table className="w-full text-sm mt-4">
+            <thead className="text-xs text-slate-500 uppercase">
+              <tr><th className="text-left py-1">File</th><th className="text-left py-1">Status</th><th className="text-right py-1">Numbers</th><th className="text-right py-1">Twilio</th><th /></tr>
+            </thead>
+            <tbody>
+              {jobs.map((j) => (
+                <tr key={j.id} className="border-t border-slate-100">
+                  <td className="py-1.5">{j.file_name ?? "—"}<div className="text-xs text-slate-400">{new Date(j.created_at).toLocaleString()}</div></td>
+                  <td className="py-1.5">
+                    {j.status === "processing" ? `Processing… ${j.summary?.twilioSoFar ? `${j.summary.twilioSoFar} checks so far` : ""}` : j.status}
+                    {j.error && <div className="text-xs text-red-600">{j.error}</div>}
+                    {j.summary?.budgetExceeded && <div className="text-xs text-amber-700">Daily Twilio limit reached — rest answered locally.</div>}
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums">{(j.summary?.unique ?? j.total).toLocaleString()}</td>
+                  <td className="py-1.5 text-right tabular-nums">
+                    {j.summary?.twilioValidations ?? "—"}
+                    {j.summary?.costUsd != null && <div className="text-xs text-slate-400">${j.summary.costUsd.toFixed(2)}</div>}
+                  </td>
+                  <td className="py-1.5 text-right">
+                    {j.status === "completed" && <button onClick={() => download(j)} className="text-xs text-red-600 hover:underline">Download CSV</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
+    </div>
+  );
+}
+
+interface Intel {
+  imports: Array<{ id: string; file_name: string; status: string; rows_valid: number; phones: number; error: string | null; created_at: string }>;
+  totals: { observations: number; numbers: number; prefixes: number; carriers: number; twilio_verified_numbers: number };
+  prefixTrust: Array<{ trust: string; n: number; avg_confidence: number }>;
+  holdout: { evaluated: number; correct: number; coverage: number; by_type: Record<string, { n: number; correct: number }> } | null;
+  audit: { samples: number; accuracy: number | null; byType: Record<string, { samples: number; accuracy: number | null }> };
+  corrections: { samples: number; accuracy: number | null };
+  portability30d: Record<string, number>;
+  unknownRate30d: number | null;
+  budgetToday: { limitUsd: number; priceUsd: number; spentUsd: number; remainingLookups: number; twilioLookups: number; localLookups: number };
+  last30d: { spentUsd: number; lookups: number; twilioLookups: number; costPer1000: number | null };
+}
+
+const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
+
+// How good the intelligence actually is, measured three independent ways.
+function IntelligencePanel() {
+  const { user } = useAuth();
+  const [d, setD] = useState<Intel | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const ref = useRef<HTMLInputElement>(null);
+  const load = () => api<Intel>("/coverage/intelligence").then(setD).catch(() => undefined);
+  useEffect(() => {
+    load();
+  }, []);
+  useEffect(() => {
+    if (!d?.imports.some((i) => i.status === "processing")) return;
+    const t = setInterval(load, 4000);
+    return () => clearInterval(t);
+  }, [d]);
+  if (!d) return null;
+  const trust = Object.fromEntries(d.prefixTrust.map((t) => [t.trust, t]));
+  const holdAcc = d.holdout ? d.holdout.correct / Math.max(1, d.holdout.evaluated) : null;
+  const isAdmin = user?.role === "company_admin" || user?.role === "super_admin";
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="font-medium text-slate-900">Phone intelligence</h2>
+        <span className="text-xs text-slate-500">
+          Twilio today: ${d.budgetToday.spentUsd.toFixed(2)} of ${d.budgetToday.limitUsd.toFixed(2)} · {d.budgetToday.remainingLookups} checks left at ${d.budgetToday.priceUsd}/lookup
+        </span>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+        <Mini label="Known numbers" value={d.totals.numbers.toLocaleString()} hint={`${d.totals.observations.toLocaleString()} observations`} />
+        <Mini label="NPA-NXX prefixes" value={d.totals.prefixes.toLocaleString()} hint={`${trust.trusted?.n ?? 0} trusted · ${trust.probable?.n ?? 0} probable · ${trust.drifting?.n ?? 0} drifting`} />
+        <Mini label="Twilio-verified numbers" value={d.totals.twilio_verified_numbers.toLocaleString()} />
+        <Mini label="Cost per 1,000 lookups (30d)" value={d.last30d.costPer1000 == null ? "—" : `$${d.last30d.costPer1000.toFixed(2)}`} hint={`${d.last30d.lookups.toLocaleString()} lookups`} />
+      </div>
+      <div className="grid md:grid-cols-3 gap-3 text-sm">
+        <div className="rounded-lg border border-slate-200 p-3">
+          <div className="text-xs text-slate-500">Live audit accuracy (30d)</div>
+          <div className="text-xl font-semibold">{pct(d.audit.accuracy)}</div>
+          <div className="text-xs text-slate-500">
+            {d.audit.samples} random Twilio checks of confident answers
+            {Object.entries(d.audit.byType).map(([t, v]) => ` · ${t} ${pct(v.accuracy)}`).join("")}
+          </div>
+        </div>
+        <div className="rounded-lg border border-slate-200 p-3">
+          <div className="text-xs text-slate-500">Holdout backtest (new numbers, prefix only)</div>
+          <div className="text-xl font-semibold">{pct(holdAcc)}</div>
+          <div className="text-xs text-slate-500">
+            {d.holdout ? `${d.holdout.evaluated.toLocaleString()} held-out numbers` : "Runs after an import"}
+            {d.holdout && Object.entries(d.holdout.by_type).map(([t, v]) => ` · ${t} ${pct(v.correct / Math.max(1, v.n))}`).join("")}
+          </div>
+        </div>
+        <div className="rounded-lg border border-slate-200 p-3">
+          <div className="text-xs text-slate-500">Twilio corrections (30d)</div>
+          <div className="text-xl font-semibold">{d.corrections.samples}</div>
+          <div className="text-xs text-slate-500">
+            Uncertain answers checked; local guess was right {pct(d.corrections.accuracy)} of the time · ported {d.portability30d.line_type_change ?? 0} · unknown rate {pct(d.unknownRate30d)}
+          </div>
+        </div>
+      </div>
+      {isAdmin && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-slate-500">Add historical lookups (CSV with PHONE, TYPE, CARRIER_NAME, QUERIED_AT):</span>
+          <input ref={ref} type="file" accept=".csv" className="text-sm" />
+          <button
+            disabled={busy}
+            onClick={async () => {
+              const f = ref.current?.files?.[0];
+              if (!f) return;
+              setBusy(true);
+              setErr(null);
+              setMsg(null);
+              const form = new FormData();
+              form.append("file", f);
+              try {
+                const res = await authedFetch("/api/coverage/intelligence/import", { method: "POST", body: form });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
+                setMsg(data.message);
+                load();
+              } catch (e) {
+                setErr(e instanceof Error ? e.message : "Import failed.");
+              } finally {
+                setBusy(false);
+              }
+            }}
+            className="bg-slate-900 text-white text-sm rounded-md px-3 py-1.5 disabled:opacity-50"
+          >
+            {busy ? "Uploading…" : "Import"}
+          </button>
+          {msg && <span className="text-green-700">{msg}</span>}
+          {err && <span className="text-red-600">{err}</span>}
+        </div>
+      )}
+      {d.imports.length > 0 && (
+        <div className="text-xs text-slate-500 space-y-0.5">
+          {d.imports.slice(0, 5).map((i) => (
+            <div key={i.id}>
+              {i.file_name}: {i.status}
+              {i.status === "completed" ? ` · ${i.rows_valid.toLocaleString()} rows · ${i.phones.toLocaleString()} numbers` : ""}
+              {i.error ? ` · ${i.error}` : ""}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Mini({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="rounded-lg bg-slate-50 p-3">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="text-lg font-semibold text-slate-900">{value}</div>
+      {hint && <div className="text-[11px] text-slate-500">{hint}</div>}
     </div>
   );
 }
