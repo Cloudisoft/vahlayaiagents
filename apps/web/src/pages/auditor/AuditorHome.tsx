@@ -283,10 +283,10 @@ export default function AuditorHome() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <span className="rounded-xl bg-red-50 p-2 text-red-600"><Icon d={I.phone} /></span>
+        <span className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center"><Icon d={I.phone} /></span>
         <div>
-          <h1 className="text-xl font-semibold text-slate-900 leading-tight">Vahlay QCs</h1>
-          <p className="text-sm text-slate-500">Automated QC analysis &amp; sales compliance</p>
+          <h1 className="text-2xl font-semibold text-slate-900 leading-tight">Vahlay QC</h1>
+          <p className="text-sm text-slate-500">Every call scored against your rules, with quotes from the transcript behind each finding.</p>
         </div>
       </div>
 
@@ -338,10 +338,27 @@ export default function AuditorHome() {
 }
 
 function EmptyReport() {
+  const steps: Array<[string, string, string]> = [
+    [I.upload, "Upload", "Drop one or many recordings — MP3, WAV, M4A and more, up to 500 MB each."],
+    [I.chart, "Full transcript", "The whole call is transcribed with speakers, and checked so no part of the audio is skipped."],
+    [I.check, "Evidence-based audit", "Each score and rule result quotes the transcript; quotes are verified against it."],
+    [I.pdf, "Report & coaching", "Open the report here, jump to any moment in the audio, or download the PDF."],
+  ];
   return (
-    <div className="h-full min-h-[420px] flex flex-col items-center justify-center text-center p-8 text-slate-400">
-      <Icon d={I.chart} className="w-10 h-10 mb-3" />
-      <div className="text-sm">Upload a recording or pick an audit to see its report.</div>
+    <div className="h-full min-h-[420px] flex flex-col justify-center p-8">
+      <div className="text-center">
+        <div className="mx-auto w-11 h-11 rounded-xl bg-red-50 text-red-600 flex items-center justify-center"><Icon d={I.chart} /></div>
+        <div className="mt-3 font-medium text-slate-800">Upload a recording or pick an audit</div>
+        <div className="text-sm text-slate-500">Its report opens here.</div>
+      </div>
+      <ol className="mt-8 grid sm:grid-cols-2 gap-3 max-w-xl mx-auto w-full">
+        {steps.map(([icon, title, text], i) => (
+          <li key={title} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3 animate-page-in" style={{ animationDelay: `${i * 60}ms` }}>
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-800"><span className="text-slate-400"><Icon d={icon} /></span>{title}</div>
+            <p className="text-xs text-slate-500 mt-1 leading-relaxed">{text}</p>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
@@ -439,14 +456,48 @@ function AuditList({ audits, selectedId, onSelect, onRetry, onRetryAll }: {
   audits: AuditRow[]; selectedId: string | null; onSelect: (id: string) => void; onRetry: (id: string) => void; onRetryAll: () => void;
 }) {
   const failed = audits.filter((a) => FAILED.includes(a.status)).length;
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<"all" | "pass" | "fail" | "review" | "error">("all");
+  const counts = {
+    all: audits.length,
+    pass: audits.filter((a) => a.status === "READY" && a.pass).length,
+    fail: audits.filter((a) => a.status === "READY" && !a.pass).length,
+    review: audits.filter((a) => a.status === "READY" && a.needs_review).length,
+    error: failed,
+  };
+  const needle = q.trim().toLowerCase();
+  const shown = audits.filter((a) => {
+    if (filter === "pass" && !(a.status === "READY" && a.pass)) return false;
+    if (filter === "fail" && !(a.status === "READY" && !a.pass)) return false;
+    if (filter === "review" && !(a.status === "READY" && a.needs_review)) return false;
+    if (filter === "error" && !FAILED.includes(a.status)) return false;
+    return !needle || [a.agent_name, a.business_name, a.file_name, a.call_type].some((x) => x?.toLowerCase().includes(needle));
+  });
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
       <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
         <h2 className="font-semibold text-slate-900 text-sm">Recent audits</h2>
         {failed > 1 && <button onClick={onRetryAll} className="text-xs text-red-600 hover:underline">Retry {failed} failed</button>}
       </div>
+      {audits.length > 3 && (
+        <div className="px-4 py-2.5 border-b border-slate-100 space-y-2">
+          <div className="relative">
+            <Icon d={I.search} className="w-4 h-4 absolute left-2.5 top-2 text-slate-400" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search agent, business or file" className="w-full text-sm border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-100 focus:border-red-300" />
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {([["all", "All"], ["pass", "Pass"], ["fail", "Fail"], ["review", "Review"], ["error", "Errors"]] as const).map(([k, l]) =>
+              counts[k] || k === "all" ? (
+                <button key={k} type="button" onClick={() => setFilter(k)} className={`text-[11px] rounded-full px-2.5 py-0.5 border transition-colors ${filter === k ? "bg-slate-900 text-white border-slate-900" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}>
+                  {l} <span className="opacity-60">{counts[k]}</span>
+                </button>
+              ) : null
+            )}
+          </div>
+        </div>
+      )}
       <div className="max-h-[560px] overflow-auto divide-y divide-slate-100">
-        {audits.map((a) => {
+        {shown.map((a) => {
           const running = isRunning(a.status);
           const failedRow = FAILED.includes(a.status);
           return (
@@ -488,6 +539,7 @@ function AuditList({ audits, selectedId, onSelect, onRetry, onRetryAll }: {
           );
         })}
         {audits.length === 0 && <div className="px-5 py-8 text-center text-sm text-slate-400">No audits yet.</div>}
+        {audits.length > 0 && shown.length === 0 && <div className="px-5 py-8 text-center text-sm text-slate-400">No audits match.</div>}
       </div>
     </div>
   );

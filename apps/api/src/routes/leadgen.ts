@@ -9,10 +9,32 @@ import { runLeadDiscovery } from "../leadgen/discoveryService.js";
 import { computeQualityScore, normalizeLeadPhone } from "../leadgen/enrichment.js";
 import { importLeads, readRows } from "../leadgen/leadImport.js";
 import { enqueueJob, isQueueEnabled } from "../services/queue.js";
+import { getOrgCredential } from "../services/credentialsService.js";
+import { env } from "../config/env.js";
 
 export const leadgenRouter = Router();
 leadgenRouter.use(requireAuth);
 leadgenRouter.use(requireModuleAccess("leadgen"));
+
+// Overview numbers and whether a lead source is connected.
+leadgenRouter.get("/summary", async (req: AuthedRequest, res) => {
+  const org = req.auth!.organizationId;
+  const [totals, lists, cred] = await Promise.all([
+    pool.query(
+      `select count(*)::int as leads,
+              count(*) filter (where coalesce(business_email, decision_maker_email) is not null)::int as with_email,
+              count(*) filter (where main_phone_e164 is not null)::int as with_phone,
+              count(*) filter (where website is not null)::int as with_website,
+              round(avg(quality_score))::int as avg_quality,
+              count(*) filter (where created_at > now() - interval '7 days')::int as new_7d
+       from leads where organization_id = $1`,
+      [org]
+    ),
+    pool.query("select count(*)::int as n from lead_lists where organization_id = $1", [org]),
+    getOrgCredential(org, "google_places"),
+  ]);
+  res.json({ ...totals.rows[0], lists: lists.rows[0].n, googlePlaces: Boolean(cred?.apiKey ?? env.googlePlacesApiKey) });
+});
 
 // --- Lead lists ---
 
@@ -60,6 +82,7 @@ leadgenRouter.post("/search", async (req: AuthedRequest, res) => {
   const d = parsed.data;
 
   let leadListId = d.leadListId;
+  const createdList = !leadListId;
   if (!leadListId) {
     const name = d.leadListName ?? `${d.keywords} ${d.state ?? d.city ?? ""}`.trim();
     const list = await pool.query(
@@ -86,7 +109,9 @@ leadgenRouter.post("/search", async (req: AuthedRequest, res) => {
     });
     res.json({ message: "Lead discovery completed.", leadListId, ...result });
   } catch (err) {
-    res.status(502).json({ error: (err as Error).message, leadListId });
+    // Don't leave an empty list behind for a search that never ran.
+    if (createdList) await pool.query("delete from lead_lists l where l.id = $1 and not exists (select 1 from leads where lead_list_id = l.id)", [leadListId]);
+    res.status(502).json({ error: (err as Error).message, leadListId: createdList ? null : leadListId });
   }
 });
 
