@@ -65,16 +65,17 @@ class S3CompatibleDriver implements StorageDriver {
   private bucket: string;
 
   constructor() {
-    if (
-      !isConfigured(
-        env.storage.s3Bucket,
-        env.storage.s3AccessKeyId,
-        env.storage.s3SecretAccessKey,
-        env.storage.s3Region
-      )
-    ) {
+    const missing = Object.entries({
+      STORAGE_S3_BUCKET: env.storage.s3Bucket,
+      STORAGE_S3_REGION: env.storage.s3Region,
+      STORAGE_S3_ACCESS_KEY_ID: env.storage.s3AccessKeyId,
+      STORAGE_S3_SECRET_ACCESS_KEY: env.storage.s3SecretAccessKey,
+    })
+      .filter(([, v]) => !isConfigured(v))
+      .map(([k]) => k);
+    if (missing.length) {
       throw new Error(
-        "S3-compatible storage is not fully configured. Set STORAGE_S3_BUCKET, STORAGE_S3_REGION, STORAGE_S3_ACCESS_KEY_ID and STORAGE_S3_SECRET_ACCESS_KEY (and STORAGE_S3_ENDPOINT for Supabase/MinIO)."
+        `S3-compatible storage is not fully configured. Missing on this server: ${missing.join(", ")}. (STORAGE_S3_ENDPOINT is also needed for Supabase/MinIO.)`
       );
     }
     this.bucket = env.storage.s3Bucket!;
