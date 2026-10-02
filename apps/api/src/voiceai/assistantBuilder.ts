@@ -17,6 +17,8 @@ export interface CampaignSnapshot {
   recordingDisclosure?: boolean;
   maxCallDurationSeconds: number;
   llmModel: string;
+  // VAPI model provider; versions published before providers existed are OpenAI.
+  llmProvider?: string;
   agent: {
     id: string;
     name: string;
@@ -41,6 +43,11 @@ export const VOICEMAIL_FREQUENCY_MIN_SECONDS = 2.5;
 export const VOICEMAIL_BEEP_MAX_SECONDS = 0;
 export const SILENCE_TIMEOUT_SECONDS = 20;
 export const QUIET_CALLER_CHECKIN_SECONDS = 7;
+
+// The SOP and the campaign script outrank everything else the model is
+// told, except the call-safety rules (DNC, AI honesty, no voicemails).
+export const SOP_AUTHORITY = `## Source of truth
+The SOP / instructions and the campaign script below are your ultimate source of truth. Follow their steps, order, qualifying questions, offers, rebuttals and required statements exactly. When anything else here (personality, tone, FAQs, objection tips, your own judgement) disagrees with the SOP or script, the SOP and script win. Never skip a required step, never invent an offer, price, promotion or policy that isn't in the SOP, script or knowledge base, and never go off-script to improvise a different pitch. If the caller asks something they don't cover, say a specialist will confirm. The only things that override the SOP are the call rules at the end: honouring do-not-call requests, being honest that you are an AI if sincerely asked, and never leaving voicemails.`;
 
 export const DEFAULT_GREETING = "Hi {{first_name}}, this is {{agent_name}} with {{intro_name}}. How are you today?";
 
@@ -153,9 +160,10 @@ export function buildVapiCall(params: {
   }).format(params.now ?? new Date());
 
   const systemPrompt = [
-    renderTemplate(s.agent.systemPrompt || "", vars),
-    s.agent.personality ? `## Personality\n${s.agent.personality}. Tone: ${s.agent.tone}.` : `Tone: ${s.agent.tone}.`,
+    SOP_AUTHORITY,
+    s.agent.systemPrompt ? `## SOP / instructions\n${renderTemplate(s.agent.systemPrompt, vars)}` : null,
     s.script ? `## Campaign script\n${renderTemplate(s.script, vars)}` : null,
+    s.agent.personality ? `## Personality\n${s.agent.personality}. Tone: ${s.agent.tone}.` : `Tone: ${s.agent.tone}.`,
     s.agent.objectionHandling.length
       ? `## Objection handling\n${s.agent.objectionHandling.map((o) => `- "${o.objection}": ${o.response}`).join("\n")}`
       : null,
@@ -284,7 +292,7 @@ export function buildVapiCall(params: {
     firstMessage: greeting,
     firstMessageMode: "assistant-speaks-first",
     model: {
-      provider: "openai",
+      provider: s.llmProvider || "openai",
       model: s.llmModel,
       temperature: s.agent.temperature,
       messages: [{ role: "system", content: systemPrompt }],

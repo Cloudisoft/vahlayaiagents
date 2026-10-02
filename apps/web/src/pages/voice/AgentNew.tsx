@@ -5,7 +5,9 @@ import { btnGhost, btnPrimary, inputCls } from "../../lib/voice.js";
 
 const AGENT_TYPES = ["sales", "support", "front_desk", "appointment_setter", "lead_qualification", "recruitment_interviewer", "follow_up", "custom"];
 const TONES = ["calm", "polite", "professional", "friendly", "conversational", "confident", "persuasive", "direct"];
-const MODELS = ["", "gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"];
+interface Catalog {
+  providers: Array<{ provider: string; label: string; models: string[] }>;
+}
 
 interface Form {
   name: string;
@@ -15,6 +17,7 @@ interface Form {
   greeting: string;
   systemPrompt: string;
   llmModel: string;
+  llmProvider: string;
   temperature: number;
   fallbackBehavior: string;
   endingBehavior: string;
@@ -32,6 +35,7 @@ const EMPTY: Form = {
   greeting: "Hi {{first_name}}, this is {{agent_name}} with {{intro_name}}. How are you today?",
   systemPrompt: "",
   llmModel: "",
+  llmProvider: "openai",
   temperature: 0.4,
   fallbackBehavior: "",
   endingBehavior: "",
@@ -50,12 +54,19 @@ export default function AgentNew() {
   const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [vapiId, setVapiId] = useState<string | null>(null);
+  const [vapiSync, setVapiSync] = useState<{ at: string | null; error: string | null }>({ at: null, error: null });
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
 
   useEffect(() => {
     api<{ voices: Array<{ id: string; name: string }> }>("/voice/voices").then((r) => setVoices(r.voices));
+    api<Catalog>("/voice/agents/models")
+      .then(setCatalog)
+      .catch((err) => setCatalogError(err instanceof ApiError ? err.message : "Couldn't load VAPI's model list."));
     if (!id) return;
     api<{ agent: any }>(`/voice/agents/${id}`).then(({ agent: a }) => {
       setVapiId(a.vapi_assistant_id);
+      setVapiSync({ at: a.vapi_synced_at, error: a.vapi_sync_error });
       setForm({
         name: a.name,
         agentType: a.agent_type,
@@ -64,6 +75,7 @@ export default function AgentNew() {
         greeting: a.greeting ?? "",
         systemPrompt: a.system_prompt ?? "",
         llmModel: a.llm_model ?? "",
+        llmProvider: a.llm_provider ?? "openai",
         temperature: Number(a.temperature ?? 0.4),
         fallbackBehavior: a.fallback_behavior ?? "",
         endingBehavior: a.ending_behavior ?? "",
@@ -90,6 +102,7 @@ export default function AgentNew() {
       greeting: form.greeting,
       systemPrompt: form.systemPrompt,
       llmModel: form.llmModel || null,
+      llmProvider: form.llmProvider,
       temperature: form.temperature,
       fallbackBehavior: form.fallbackBehavior || null,
       endingBehavior: form.endingBehavior || undefined,
@@ -99,11 +112,18 @@ export default function AgentNew() {
       objectionHandling: form.objectionHandling.filter((o) => o.objection.trim() && o.response.trim()),
     };
     try {
+      type SaveResult = { agent: { id: string; vapi_assistant_id: string | null }; vapiSync: { assistantId: string | null; error: string | null } };
       if (id) {
-        await api(`/voice/agents/${id}`, { method: "PATCH", body });
-        setSaved("Saved. Campaigns using this agent pick up the change on their next Save & publish.");
+        const r = await api<SaveResult>(`/voice/agents/${id}`, { method: "PATCH", body });
+        setVapiId(r.vapiSync.assistantId);
+        setVapiSync({ at: r.vapiSync.error ? vapiSync.at : new Date().toISOString(), error: r.vapiSync.error });
+        setSaved(
+          r.vapiSync.error
+            ? "Saved here. Campaigns using this agent pick it up on their next Save."
+            : "Saved and updated in VAPI. Campaigns using this agent pick it up on their next Save."
+        );
       } else {
-        const r = await api<{ agent: { id: string } }>("/voice/agents", { method: "POST", body });
+        const r = await api<SaveResult>("/voice/agents", { method: "POST", body });
         navigate(`/voice/agents/${r.agent.id}`, { replace: true });
       }
     } catch (err) {
@@ -125,9 +145,39 @@ export default function AgentNew() {
         <h1 className="text-2xl font-semibold text-slate-900">{id ? form.name || "Agent" : "New AI Agent"}</h1>
         {id && <button onClick={remove} className="text-sm text-slate-500 hover:text-red-600">Delete agent</button>}
       </div>
-      {vapiId && (
-        <div className="mb-4 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md p-2">
-          Imported from VAPI assistant <span className="font-mono">{vapiId}</span>. Calls use this copy; re-run "Import from VAPI" to pull changes made in the VAPI dashboard.
+      {id && (
+        <div
+          className={`mb-4 text-xs rounded-md p-2 border flex items-center justify-between gap-3 ${
+            vapiSync.error ? "text-amber-800 bg-amber-50 border-amber-200" : "text-slate-600 bg-slate-50 border-slate-200"
+          }`}
+        >
+          <span>
+            {vapiSync.error ? (
+              <>VAPI not updated: {vapiSync.error}</>
+            ) : vapiId ? (
+              <>
+                Synced to VAPI assistant <span className="font-mono">{vapiId}</span>
+                {vapiSync.at && <> · {new Date(vapiSync.at).toLocaleString()}</>}. Every save updates it.
+              </>
+            ) : (
+              <>Not in VAPI yet — saving creates the assistant there.</>
+            )}
+          </span>
+          <button
+            type="button"
+            className="shrink-0 underline hover:text-slate-900"
+            onClick={async () => {
+              try {
+                const r = await api<{ assistantId: string }>(`/voice/agents/${id}/sync-vapi`, { method: "POST" });
+                setVapiId(r.assistantId);
+                setVapiSync({ at: new Date().toISOString(), error: null });
+              } catch (err) {
+                setVapiSync((v) => ({ ...v, error: err instanceof ApiError ? err.message : "Sync failed." }));
+              }
+            }}
+          >
+            Sync now
+          </button>
         </div>
       )}
       {error && <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
@@ -164,16 +214,35 @@ export default function AgentNew() {
           <p className="text-xs text-slate-500 mt-1">Placeholders: {"{{first_name}} {{agent_name}} {{intro_name}} {{company_name}} {{current_provider}}"} — unknown ones are dropped, never read aloud.</p>
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Instructions / SOP</label>
+          <label className="block text-sm font-medium text-slate-700 mb-1">SOP / instructions — the agent's source of truth</label>
           <textarea rows={12} value={form.systemPrompt} onChange={(e) => set("systemPrompt", e.target.value)} className={`${inputCls} font-mono text-xs`} />
-          <p className="text-xs text-slate-500 mt-1">Platform call rules (one question per turn, no interrupting, voicemail, DNC, callbacks) are added automatically.</p>
+          <p className="text-xs text-slate-500 mt-1">The agent follows this SOP and the campaign script exactly; they override its personality, FAQs and its own judgement. Only the call-safety rules (Do Not Call, AI honesty, no voicemails) come before it.</p>
         </div>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-[2fr_1fr_1fr] gap-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Model</label>
-            <select value={form.llmModel} onChange={(e) => set("llmModel", e.target.value)} className={inputCls}>
-              {MODELS.map((m) => <option key={m} value={m}>{m || "Campaign default"}</option>)}
-            </select>
+            <label className="block text-sm font-medium text-slate-700 mb-1">AI model (from VAPI)</label>
+            <div className="flex gap-2">
+              <select
+                value={form.llmProvider}
+                onChange={(e) => setForm((f) => ({ ...f, llmProvider: e.target.value, llmModel: "" }))}
+                className={`${inputCls} w-28`}
+                aria-label="Model provider"
+              >
+                {(catalog?.providers ?? [{ provider: "openai", label: "OpenAI", models: [] }]).map((p) => (
+                  <option key={p.provider} value={p.provider}>{p.label}</option>
+                ))}
+              </select>
+              <select value={form.llmModel} onChange={(e) => set("llmModel", e.target.value)} className={inputCls} aria-label="Model">
+                <option value="">Campaign default (gpt-4o-mini)</option>
+                {form.llmModel && !catalog?.providers.find((p) => p.provider === form.llmProvider)?.models.includes(form.llmModel) && (
+                  <option value={form.llmModel}>{form.llmModel}</option>
+                )}
+                {catalog?.providers
+                  .find((p) => p.provider === form.llmProvider)
+                  ?.models.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            {catalogError && <p className="text-xs text-amber-700 mt-1">{catalogError}</p>}
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Temperature: {form.temperature.toFixed(1)}</label>

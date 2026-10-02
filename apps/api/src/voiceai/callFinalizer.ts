@@ -44,7 +44,16 @@ export function reportFromVapi(obj: any): CallReport {
     endedReason: obj?.endedReason ?? call.endedReason ?? null,
     durationSeconds: duration,
     messages,
-    recordingUrl: artifact.recordingUrl ?? obj?.recordingUrl ?? call.recordingUrl ?? null,
+    // Stereo (agent and caller on separate channels) is VAPI's highest-quality copy.
+    recordingUrl:
+      artifact.recording?.stereoUrl ??
+      artifact.stereoRecordingUrl ??
+      obj?.stereoRecordingUrl ??
+      artifact.recording?.mono?.combinedUrl ??
+      artifact.recordingUrl ??
+      obj?.recordingUrl ??
+      call.recordingUrl ??
+      null,
     summary: analysis.summary ?? obj?.summary ?? null,
     successEvaluation: analysis.successEvaluation ?? null,
     cost: typeof (obj?.cost ?? call.cost) === "number" ? (obj?.cost ?? call.cost) : null,
@@ -203,6 +212,14 @@ async function storeArtifacts(call: any, report: CallReport) {
       [call.id, report.summary, evaluationToScore(report.successEvaluation), JSON.stringify({ successEvaluation: report.successEvaluation })]
     );
   }
+  // Coaching review once there's a real conversation (talk time is set by
+  // the time artifacts are stored for a finished call).
+  const talk = await pool.query("select talk_seconds, ai_review from calls where id = $1", [call.id]);
+  if (report.messages.length > 1 && (talk.rows[0]?.talk_seconds ?? 0) >= 15 && !talk.rows[0]?.ai_review) {
+    import("./callReview.js")
+      .then((m) => m.reviewCall(call.id))
+      .catch(() => undefined); // the worker's sweep retries
+  }
   if (report.recordingUrl) {
     storeRecording(call, report.recordingUrl).catch((err) =>
       pool.query(`insert into system_logs (organization_id, level, source, message) values ($1,'error','vapi.recording',$2)`, [
@@ -232,10 +249,10 @@ async function storeRecording(call: any, url: string) {
     size: stored.size,
   });
   await pool.query(
-    `insert into call_recordings (call_id, file_id, provider_recording_url, processing_status)
-     values ($1,$2,$3,'completed')
+    `insert into call_recordings (call_id, file_id, provider_recording_url, processing_status, source, channels)
+     values ($1,$2,$3,'completed','vapi',$4)
      on conflict (call_id) do update set file_id = excluded.file_id, provider_recording_url = excluded.provider_recording_url,
-       processing_status = 'completed'`,
-    [call.id, fileId, url]
+       processing_status = 'completed', source = 'vapi', channels = excluded.channels`,
+    [call.id, fileId, url, /stereo/i.test(url) ? 2 : 1]
   );
 }

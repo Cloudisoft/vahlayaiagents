@@ -19,6 +19,8 @@ interface LiveCall {
   can_listen: boolean;
   can_control: boolean;
   turns: Array<{ speaker: string; text: string; role?: string }> | null;
+  transfer_number: string | null;
+  transfer_targets: Record<string, string> | null;
 }
 
 interface Line {
@@ -235,12 +237,14 @@ export default function LiveCalls() {
     }
   }
 
-  async function control(kind: "whisper" | "barge" | "transfer" | "end") {
+  async function control(kind: "whisper" | "barge" | "transfer" | "end", to?: string) {
     if (!focus) return;
     if (kind === "end" && !confirm("Hang up this call now?")) return;
+    const target = to ?? transferTo;
+    if (kind === "transfer" && !confirm(`Transfer this call to ${formatPhone(target)} now?`)) return;
     setNotice(null);
     try {
-      const body = kind === "transfer" ? { transferTo } : kind === "end" ? {} : { message: text };
+      const body = kind === "transfer" ? { transferTo: target } : kind === "end" ? {} : { message: text };
       await api(`/voice/calls/${focus}/${kind}`, { method: "POST", body });
       setNotice({
         kind: "ok",
@@ -346,11 +350,26 @@ export default function LiveCalls() {
                       {can("calls.barge") && <button disabled={!text.trim()} onClick={() => control("barge")} className={btnGhost} title="The agent says this to the caller now">Barge</button>}
                     </div>
                   )}
+                  {can("calls.transfer") && (focused.transfer_number || Object.keys(focused.transfer_targets ?? {}).length > 0) && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="text-slate-500">Transfer to:</span>
+                      {[
+                        ...(focused.transfer_number ? [["Sales", focused.transfer_number] as const] : []),
+                        ...Object.entries(focused.transfer_targets ?? {})
+                          .filter(([dept, n]) => n && !(dept === "sales" && focused.transfer_number))
+                          .map(([dept, n]) => [dept[0].toUpperCase() + dept.slice(1), n] as const),
+                      ].map(([label, n]) => (
+                        <button key={label} onClick={() => control("transfer", n)} className="rounded-full border border-slate-300 px-2.5 py-1 hover:border-red-400 hover:text-red-700">
+                          {label} · {formatPhone(n)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex gap-2">
                     {can("calls.transfer") && (
                       <>
-                        <input value={transferTo} onChange={(e) => setTransferTo(e.target.value)} placeholder="Transfer to (US number)" className={inputCls} />
-                        <button disabled={!transferTo} onClick={() => control("transfer")} className={btnGhost}>Transfer</button>
+                        <input value={transferTo} onChange={(e) => setTransferTo(e.target.value)} placeholder="Transfer to another number" className={inputCls} />
+                        <button disabled={!transferTo.trim()} onClick={() => control("transfer")} className={btnGhost}>Transfer</button>
                       </>
                     )}
                     {can("calls.end") && <button onClick={() => control("end")} className="bg-red-600 text-white text-sm rounded-md px-4 py-2 hover:bg-red-700 whitespace-nowrap">End call</button>}

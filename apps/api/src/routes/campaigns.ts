@@ -11,6 +11,7 @@ import { normalizeLeadPhone } from "../leadgen/enrichment.js";
 import { importLeads, readRows } from "../leadgen/leadImport.js";
 import { normalizePlaceholders } from "../voiceai/placeholders.js";
 import { parseWindow, zonedLocalToUtc } from "../voiceai/callingWindow.js";
+import { normalizeE164 } from "../utils/phone.js";
 import { publishCampaign, agentChangedSincePublish, PublishError } from "../voiceai/campaignVersions.js";
 import { hangUp } from "../voiceai/dialer.js";
 import { publishEvent, signalSlotFreed } from "../services/events.js";
@@ -30,19 +31,33 @@ const windowSchema = z.object({
   lunchBreak: z.object({ start: hhmm, end: hhmm }).nullable(),
 });
 
+// Transfer lines must be dialable as-is by VAPI, so they're stored as E.164.
+const phoneField = z
+  .string()
+  .nullable()
+  .transform((v, ctx) => {
+    if (v == null || !v.trim()) return null;
+    const n = normalizeE164(v);
+    if (!n) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `"${v}" isn't a valid phone number. Use a format like +13025550100.` });
+      return z.NEVER;
+    }
+    return n;
+  });
+
 const campaignSchema = z.object({
   name: z.string().min(1),
   description: z.string().nullable().optional(),
   aiAgentId: z.string().uuid().nullable().optional(),
   voiceId: z.string().uuid().nullable().optional(),
-  transferNumber: z.string().nullable().optional(),
+  transferNumber: phoneField.optional(),
   concurrency: z.number().int().min(1).max(50).optional(),
   maxAttempts: z.number().int().min(1).max(10).optional(),
   callingHours: windowSchema.optional(),
   timeZone: z.string().optional(),
   maxCallDurationSeconds: z.number().int().min(60).max(3600).optional(),
   introName: z.string().nullable().optional(),
-  callbackNumber: z.string().nullable().optional(),
+  callbackNumber: phoneField.optional(),
   script: z.string().nullable().optional(),
   knowledgeText: z.string().nullable().optional(),
   retryOnVoicemail: z.boolean().optional(),
@@ -52,10 +67,10 @@ const campaignSchema = z.object({
   llmModel: z.string().optional(),
   transferTargets: z
     .object({
-      sales: z.string().nullable().optional(),
-      support: z.string().nullable().optional(),
-      retention: z.string().nullable().optional(),
-      manager: z.string().nullable().optional(),
+      sales: phoneField.optional(),
+      support: phoneField.optional(),
+      retention: phoneField.optional(),
+      manager: phoneField.optional(),
     })
     .optional(),
   recordingDisclosure: z.boolean().optional(),
@@ -297,7 +312,7 @@ campaignsRouter.post("/:id/control", requirePermission("campaign.start"), async 
   const { action } = parsed.data;
 
   if (["start", "resume", "restart", "schedule"].includes(action) && !campaign.published_version_id) {
-    return res.status(400).json({ error: "Save & publish the campaign before starting it." });
+    return res.status(400).json({ error: "Save the campaign before starting it." });
   }
 
   let status: string = campaign.status;

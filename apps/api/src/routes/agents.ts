@@ -5,7 +5,8 @@ import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { requireModuleAccess } from "../middleware/moduleAccess.js";
 import { requireTab } from "../services/accessService.js";
 import { requireRole } from "../middleware/rbac.js";
-import { listVapiAssistants } from "../voiceai/vapiClient.js";
+import { listVapiAssistants, vapiModelCatalog } from "../voiceai/vapiClient.js";
+import { syncAgentToVapi } from "../voiceai/agentSync.js";
 import { AGENT_TEMPLATES } from "../voiceai/agentTemplates.js";
 
 export const agentsRouter = Router();
@@ -44,6 +45,7 @@ const agentSchema = z.object({
   greeting: z.string().optional(),
   endingBehavior: z.string().optional(),
   llmModel: z.string().nullable().optional(),
+  llmProvider: z.string().max(40).optional(),
   temperature: z.number().min(0).max(1.5).optional(),
   fallbackBehavior: z.string().nullable().optional(),
 });
@@ -55,6 +57,21 @@ agentsRouter.get("/", async (req: AuthedRequest, res) => {
     [req.auth!.organizationId]
   );
   res.json({ agents: result.rows });
+});
+
+// Models VAPI supports, straight from VAPI's published API schema.
+agentsRouter.get("/models", async (_req, res) => {
+  try {
+    res.json(await vapiModelCatalog());
+  } catch (err) {
+    res.status(502).json({ error: (err as Error).message });
+  }
+});
+
+agentsRouter.post("/:id/sync-vapi", async (req: AuthedRequest, res) => {
+  const result = await syncAgentToVapi(String(req.params.id), req.auth!.organizationId);
+  if (result.error) return res.status(502).json({ error: result.error });
+  res.json({ message: "Synced to VAPI.", assistantId: result.assistantId });
 });
 
 agentsRouter.get("/templates", (_req, res) => {
@@ -149,8 +166,8 @@ agentsRouter.post("/", async (req: AuthedRequest, res) => {
   const result = await pool.query(
     `insert into ai_agents (organization_id, name, agent_type, purpose, system_prompt, personality, tone, faqs,
        objection_handling, transfer_rules, working_hours, max_call_duration_seconds, voice_id, language, greeting,
-       ending_behavior, created_by, llm_model, temperature, fallback_behavior)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) returning *`,
+       ending_behavior, created_by, llm_model, temperature, fallback_behavior, llm_provider)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) returning *`,
     [
       req.auth!.organizationId,
       d.name,
@@ -172,9 +189,11 @@ agentsRouter.post("/", async (req: AuthedRequest, res) => {
       d.llmModel ?? null,
       d.temperature ?? 0.4,
       d.fallbackBehavior ?? null,
+      d.llmProvider ?? "openai",
     ]
   );
-  res.status(201).json({ agent: result.rows[0] });
+  const sync = await syncAgentToVapi(result.rows[0].id, req.auth!.organizationId);
+  res.status(201).json({ agent: { ...result.rows[0], vapi_assistant_id: sync.assistantId, vapi_sync_error: sync.error }, vapiSync: sync });
 });
 
 agentsRouter.patch("/:id", async (req: AuthedRequest, res) => {
@@ -195,7 +214,7 @@ agentsRouter.patch("/:id", async (req: AuthedRequest, res) => {
        max_call_duration_seconds = coalesce($11, max_call_duration_seconds), voice_id = coalesce($12, voice_id),
        language = coalesce($13, language), greeting = coalesce($14, greeting), ending_behavior = coalesce($15, ending_behavior),
        llm_model = coalesce($17, llm_model), temperature = coalesce($18, temperature),
-       fallback_behavior = coalesce($19, fallback_behavior),
+       fallback_behavior = coalesce($19, fallback_behavior), llm_provider = coalesce($20, llm_provider),
        updated_at = now()
      where id = $16 returning *`,
     [
@@ -218,9 +237,11 @@ agentsRouter.patch("/:id", async (req: AuthedRequest, res) => {
       d.llmModel ?? null,
       d.temperature ?? null,
       d.fallbackBehavior ?? null,
+      d.llmProvider ?? null,
     ]
   );
-  res.json({ agent: result.rows[0] });
+  const sync = await syncAgentToVapi(String(req.params.id), req.auth!.organizationId);
+  res.json({ agent: { ...result.rows[0], vapi_assistant_id: sync.assistantId, vapi_sync_error: sync.error }, vapiSync: sync });
 });
 
 agentsRouter.delete("/:id", async (req: AuthedRequest, res) => {

@@ -25,3 +25,17 @@ export function parseNpaNxx(e164Us: string): { npa: string; nxx: string } | null
   if (!match) return null;
   return { npa: match[1], nxx: match[2] };
 }
+
+// Any dialable number to E.164: "+44 20 7946 0958" keeps its country code,
+// bare 10/11-digit numbers are taken as US. Returns null when it can't tell.
+export function normalizeE164(raw: string): string | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  const digits = s.replace(/\D/g, "");
+  if (s.startsWith("+") || s.startsWith("00")) {
+    const intl = s.startsWith("00") ? digits.slice(2) : digits;
+    if (intl.startsWith("1")) return normalizeUsE164(intl);
+    return intl.length >= 8 && intl.length <= 15 && !intl.startsWith("0") ? `+${intl}` : null;
+  }
+  return normalizeUsE164(digits);
+}

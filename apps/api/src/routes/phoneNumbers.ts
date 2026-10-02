@@ -12,6 +12,7 @@ import {
   importTwilioNumberToVapi,
   listVapiPhoneNumbers,
   pointVapiNumberAtServer,
+  updateVapiPhoneNumber,
 } from "../voiceai/vapiClient.js";
 
 export const phoneNumbersRouter = Router();
@@ -204,11 +205,48 @@ phoneNumbersRouter.post("/:id/route-inbound", async (req: AuthedRequest, res) =>
   if (!row.vapi_phone_number_id) return res.status(400).json({ error: "This number isn't connected to VAPI." });
   try {
     await pointVapiNumberAtServer(req.auth!.organizationId, row.vapi_phone_number_id);
-    await pool.query("update phone_numbers set inbound_route = $2 where id = $1", [row.id, JSON.stringify({ mode: "campaign_agent", since: new Date().toISOString() })]);
+    await pool.query("update phone_numbers set inbound_route = $2, inbound_enabled = true where id = $1", [row.id, JSON.stringify({ mode: "campaign_agent", since: new Date().toISOString() })]);
     res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ error: (err as Error).message });
   }
+});
+
+// Inbound routing: turn AI answering on for a number and pick the campaign
+// whose published agent, SOP, knowledge base and transfer lines answer it.
+// On points the VAPI number's webhook here (VAPI then asks us for the
+// assistant on every call); off detaches it again.
+phoneNumbersRouter.put("/:id/inbound", async (req: AuthedRequest, res) => {
+  const parsed = z.object({ enabled: z.boolean(), campaignId: z.string().uuid().nullable().optional() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  const org = req.auth!.organizationId;
+  const r = await pool.query("select * from phone_numbers where id = $1 and organization_id = $2", [req.params.id, org]);
+  const row = r.rows[0];
+  if (!row) return res.status(404).json({ error: "Phone number not found." });
+  if (!row.vapi_phone_number_id) return res.status(400).json({ error: "Connect this number to VAPI first." });
+  const campaignId = parsed.data.campaignId ?? row.assigned_campaign_id;
+  if (parsed.data.enabled) {
+    if (!campaignId) return res.status(400).json({ error: "Choose the campaign that answers this number." });
+    const c = await pool.query("select published_version_id from campaigns where id = $1 and organization_id = $2", [campaignId, org]);
+    if (!c.rows[0]) return res.status(400).json({ error: "Campaign not found." });
+    if (!c.rows[0].published_version_id) return res.status(400).json({ error: "Save that campaign first so it has a live version to answer with." });
+  }
+  try {
+    if (parsed.data.enabled) await pointVapiNumberAtServer(org, row.vapi_phone_number_id);
+    else await updateVapiPhoneNumber(org, row.vapi_phone_number_id, { server: null });
+  } catch (err) {
+    return res.status(502).json({ error: (err as Error).message });
+  }
+  const updated = await pool.query(
+    `update phone_numbers set inbound_enabled = $2, assigned_campaign_id = $3, inbound_route = $4 where id = $1 returning *`,
+    [
+      row.id,
+      parsed.data.enabled,
+      campaignId ?? null,
+      JSON.stringify(parsed.data.enabled ? { mode: "campaign_agent", since: new Date().toISOString() } : {}),
+    ]
+  );
+  res.json({ phoneNumber: updated.rows[0] });
 });
 
 // Removes the number from this app only — Twilio and VAPI are not touched.

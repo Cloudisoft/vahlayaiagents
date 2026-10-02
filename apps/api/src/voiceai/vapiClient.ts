@@ -165,3 +165,72 @@ export async function controlVapiCall(controlUrl: string, body: Record<string, u
   });
   if (!res.ok) throw new VapiApiError(res.status, await res.text());
 }
+
+export async function createVapiAssistant(organizationId: string, body: Record<string, unknown>): Promise<VapiAssistant> {
+  return request<VapiAssistant>(await resolveVapiKey(organizationId), "POST", "/assistant", body);
+}
+
+export async function updateVapiAssistant(organizationId: string, id: string, body: Record<string, unknown>): Promise<VapiAssistant> {
+  return request<VapiAssistant>(await resolveVapiKey(organizationId), "PATCH", `/assistant/${id}`, body);
+}
+
+export async function updateVapiPhoneNumber(organizationId: string, id: string, body: Record<string, unknown>): Promise<VapiPhoneNumber> {
+  return request<VapiPhoneNumber>(await resolveVapiKey(organizationId), "PATCH", `/phone-number/${id}`, body);
+}
+
+// VAPI has no balance endpoint for API keys; month-to-date spend comes from
+// its analytics API, which is what the dashboard's usage figure is built on.
+export async function vapiSpend(organizationId: string, from: Date, to: Date): Promise<{ cost: number; calls: number }> {
+  const r = await request<Array<{ result: Array<{ sumCost?: number; countId?: string | number }> }>>(
+    await resolveVapiKey(organizationId),
+    "POST",
+    "/analytics",
+    {
+      queries: [
+        {
+          table: "call",
+          name: "spend",
+          operations: [
+            { operation: "sum", column: "cost" },
+            { operation: "count", column: "id" },
+          ],
+          timeRange: { start: from.toISOString(), end: to.toISOString() },
+        },
+      ],
+    }
+  );
+  const row = r[0]?.result?.[0] ?? {};
+  return { cost: Number(row.sumCost ?? 0), calls: Number(row.countId ?? 0) };
+}
+
+// The models VAPI accepts, read from VAPI's own published API schema so the
+// list tracks what VAPI supports without a code change.
+export interface ModelCatalog {
+  providers: Array<{ provider: string; label: string; models: string[] }>;
+  fetchedAt: string;
+}
+const CATALOG_PROVIDERS: Array<[string, string, string]> = [
+  ["openai", "OpenAI", "OpenAIModel"],
+  ["anthropic", "Anthropic", "AnthropicModel"],
+  ["google", "Google", "GoogleModel"],
+  ["groq", "Groq", "GroqModel"],
+];
+let catalogCache: { at: number; value: ModelCatalog } | null = null;
+
+export async function vapiModelCatalog(): Promise<ModelCatalog> {
+  if (catalogCache && Date.now() - catalogCache.at < 6 * 3600_000) return catalogCache.value;
+  const res = await fetch(`${VAPI_BASE}/api-json`, { headers: { "User-Agent": "VahlaySmartAI/1.0" } });
+  if (!res.ok) throw new VapiApiError(res.status, "Could not load VAPI's model list.");
+  const spec = (await res.json()) as any;
+  const schemas = spec?.components?.schemas ?? {};
+  const providers = CATALOG_PROVIDERS.map(([provider, label, schema]) => {
+    const all: string[] = schemas[schema]?.properties?.model?.enum ?? [];
+    // Region-pinned deployments ("gpt-4o:westus") and realtime/audio models
+    // aren't usable for a phone agent's text model.
+    const models = all.filter((m) => !m.includes(":") && !/realtime|audio|live/i.test(m));
+    return { provider, label, models };
+  }).filter((p) => p.models.length > 0);
+  const value = { providers, fetchedAt: new Date().toISOString() };
+  catalogCache = { at: Date.now(), value };
+  return value;
+}

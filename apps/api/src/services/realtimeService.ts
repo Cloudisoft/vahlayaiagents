@@ -2,7 +2,7 @@ import type { Server as HttpServer, IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import { verifyAccessToken } from "./authService.js";
-import { subscribe, EVENTS_CHANNEL } from "./events.js";
+import { subscribe, EVENTS_CHANNEL, isOwnEvent, setLocalDelivery } from "./events.js";
 import { hasPermission } from "../middleware/permissions.js";
 import { canUseTab, loadAccess } from "./accessService.js";
 import { pool } from "../db/pool.js";
@@ -76,9 +76,11 @@ export function initRealtime(server: HttpServer) {
     }
   }, HEARTBEAT_MS);
 
+  setLocalDelivery(broadcastToOrg);
   subscribe(EVENTS_CHANNEL, (payload) => {
     try {
-      const { organizationId, event } = JSON.parse(payload);
+      const { organizationId, event, origin } = JSON.parse(payload);
+      if (isOwnEvent(origin)) return; // already delivered in-process
       broadcastToOrg(organizationId, event);
     } catch {
       // malformed notification — ignore

@@ -206,21 +206,17 @@ export default function CampaignDetail() {
     setDraft({});
   }
 
+  // One Save: stores the edits and makes them live for new calls at once.
   async function saveAndPublish() {
     await act("publish", async () => {
       await saveDraft();
       setWarnings([]);
-      let confirmAgentChange = false;
-      if (agentChanged) {
-        confirmAgentChange = confirm("The linked agent changed since the last publish. Publish those agent changes to live calls too?");
-        if (!confirmAgentChange) return;
-      }
       const r = await api<{ version: number; warnings: string[] }>(`/voice/campaigns/${id}/publish`, {
         method: "POST",
-        body: { confirmAgentChange },
+        body: { confirmAgentChange: true },
       });
       setWarnings(r.warnings);
-      return `Published version ${r.version}. New calls use it immediately; calls already in progress finish on the old version.`;
+      return `Saved — version ${r.version} is live. New calls use it now; calls already in progress finish on the previous version.`;
     });
   }
 
@@ -385,10 +381,16 @@ export default function CampaignDetail() {
             </div>
           </Section>
 
-          <Section title="Transfers (escalation matrix)">
-            <p className="text-xs text-slate-500 -mt-1">The agent picks the team that matches what the caller needs. Leave a team empty and the agent books a callback instead.</p>
+          <Section title="Transfer numbers">
+            <p className="text-xs text-slate-500 -mt-1">
+              When the caller agrees, the agent transfers them to the matching line. The main number is used for sales and for any team left
+              empty. With no number set the agent books a callback instead. Any format works — it's saved as E.164 (+13025550100).
+            </p>
+            {!value("transferNumber") && !Object.values(value("transferTargets") ?? {}).some(Boolean) && (
+              <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-2">No transfer number set — this campaign can't transfer calls.</div>
+            )}
             <div className="grid md:grid-cols-2 gap-4">
-              <Field label="Sales" hint="Pricing, availability, promotions, contracts, new sales.">
+              <Field label="Main transfer number (sales)" hint="Pricing, availability, promotions, contracts, new sales.">
                 <input value={value("transferNumber") ?? ""} onChange={(e) => set("transferNumber", e.target.value)} className={inputCls} placeholder="+13025550100" />
               </Field>
               {(["support", "retention", "manager"] as const).map((dept) => (
@@ -507,18 +509,17 @@ export default function CampaignDetail() {
               {dirty ? (
                 <span className="text-amber-700">Unsaved changes</span>
               ) : campaign.has_unpublished_changes || !campaign.published_version_id ? (
-                <span className="text-amber-700">Saved changes not published — live calls still use {campaign.published_version ? `v${campaign.published_version}` : "nothing yet"}</span>
+                <span className="text-amber-700">Changes not live yet — press Save to apply them</span>
               ) : agentChanged ? (
-                <span className="text-amber-700">The agent changed since v{campaign.published_version} — publish to use it</span>
+                <span className="text-amber-700">The agent changed since v{campaign.published_version} — press Save to use it</span>
               ) : (
                 <span className="text-slate-500">Live calls use v{campaign.published_version}</span>
               )}
             </div>
             <div className="flex gap-2">
               {dirty && <button onClick={() => setDraft({})} className={btnGhost}>Discard</button>}
-              {dirty && <button disabled={busy !== null} onClick={() => act("save", async () => { await saveDraft(); return "Saved as draft (not live yet)."; })} className={btnGhost}>Save draft</button>}
               <button disabled={busy !== null} onClick={saveAndPublish} className={btnPrimary}>
-                {busy === "publish" ? "Publishing…" : "Save & publish"}
+                {busy === "publish" ? "Saving…" : "Save"}
               </button>
             </div>
           </div>

@@ -108,11 +108,11 @@ export async function normalizeCallRecording(buffer: Buffer, inputExt = "wav"): 
       "-af",
       "loudnorm=I=-16:TP=-1.5:LRA=11",
       "-ar",
-      "44100",
+      "48000",
       "-c:a",
       "libmp3lame",
       "-b:a",
-      "192k",
+      "256k",
       outputPath,
     ]);
     return await readFile(outputPath);

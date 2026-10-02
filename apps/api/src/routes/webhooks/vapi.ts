@@ -65,8 +65,10 @@ vapiWebhookRouter.post("/", async (req: Request, res: Response) => {
         await handleStatus(message);
         return res.status(200).json({});
       case "transcript":
+        // Acknowledge first: VAPI shouldn't wait on our bookkeeping.
+        res.status(200).json({});
         await handleTranscript(message);
-        return res.status(200).json({});
+        return;
       case "transfer-update": {
         const call = await findCall(message);
         if (call) {
@@ -115,22 +117,45 @@ async function handleStatus(message: any) {
   await publishEvent(call.organization_id, { type: "call_status", callId: call.id, status });
 }
 
-async function handleTranscript(message: any) {
+// Transcript messages arrive many times a second during a call; the call
+// row they belong to is looked up once and kept briefly in memory.
+const liveCallCache = new Map<string, { at: number; call: { id: string; organization_id: string; voice_name: string | null; customer_spoke: boolean } }>();
+async function findLiveCall(message: any) {
+  const key = message?.call?.id;
+  const hit = key ? liveCallCache.get(key) : undefined;
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.call;
   const call = await findCall(message);
+  if (!call) return null;
+  const slim = { id: call.id, organization_id: call.organization_id, voice_name: call.voice_name, customer_spoke: call.customer_spoke };
+  if (key) {
+    if (liveCallCache.size > 2000) liveCallCache.clear();
+    liveCallCache.set(key, { at: Date.now(), call: slim });
+  }
+  return slim;
+}
+
+async function handleTranscript(message: any) {
+  const call = await findLiveCall(message);
   if (!call) return;
   const role = message.role === "user" ? "user" : "assistant";
   const final = message.transcriptType === "final";
-  if (role === "user" && final && !call.customer_spoke && String(message.transcript ?? "").trim()) {
+  const text = String(message.transcript ?? "");
+  const speaker = role === "user" ? "Customer" : spokenAgentName(call.voice_name) || "Agent";
+  // Push to the browser before touching the database.
+  await publishEvent(call.organization_id, { type: "transcript", callId: call.id, role, speaker, text, partial: !final });
+  if (!final || !text.trim()) return;
+  if (role === "user" && !call.customer_spoke) {
+    call.customer_spoke = true;
     await pool.query("update calls set customer_spoke = true, last_signal_at = now() where id = $1", [call.id]);
   }
-  await publishEvent(call.organization_id, {
-    type: "transcript",
-    callId: call.id,
-    role,
-    speaker: role === "user" ? "Customer" : spokenAgentName(call.voice_name) || "Agent",
-    text: message.transcript ?? "",
-    partial: !final,
-  });
+  // Keep the running transcript so a supervisor opening the call mid-way
+  // sees what was already said. The end-of-call report replaces it.
+  await pool.query(
+    `insert into call_transcripts (call_id, turns, full_text) values ($1, $2::jsonb, $3)
+     on conflict (call_id) do update set turns = call_transcripts.turns || excluded.turns,
+       full_text = coalesce(call_transcripts.full_text || E'\n', '') || excluded.full_text`,
+    [call.id, JSON.stringify([{ speaker, role, text, ts: Number(message.secondsFromStart ?? 0) }]), `${speaker}: ${text}`]
+  );
 }
 
 function parseArgs(raw: unknown): Record<string, any> {
@@ -261,7 +286,9 @@ async function handleInbound(message: any) {
     [vapiNumberId]
   );
   const number = num.rows[0];
-  if (!number?.campaign_id) return { error: "This number isn't assigned to a campaign." };
+  if (!number) return { error: "This number isn't set up in Vahlay." };
+  if (!number.inbound_enabled) return { error: "AI answering is turned off for this number." };
+  if (!number.campaign_id) return { error: "This number isn't assigned to a campaign." };
 
   const c = await pool.query("select * from campaigns where id = $1", [number.campaign_id]);
   const campaign = c.rows[0];

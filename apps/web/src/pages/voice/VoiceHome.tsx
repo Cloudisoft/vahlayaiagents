@@ -39,6 +39,9 @@ interface PhoneNumber {
   area_code: string | null;
   vapi_phone_number_id: string | null;
   inbound_route: { mode?: string } | null;
+  inbound_enabled: boolean;
+  assigned_campaign_id: string | null;
+  campaign_name: string | null;
 }
 interface Campaign {
   id: string;
@@ -78,7 +81,7 @@ export default function VoiceHome({ tab }: { tab: Tab }) {
   const templatesQ = useApi<{ templates: Template[] }>(tab === "agents" || tab === "campaigns" ? K.templates : null);
   const voicesQ = useApi<{ voices: Voice[] }>(tab === "voices" ? K.voices : null);
   const numbersQ = useApi<{ phoneNumbers: PhoneNumber[] }>(tab === "numbers" ? K.numbers : null);
-  const campaignsQ = useApi<{ campaigns: Campaign[] }>(tab === "campaigns" ? K.campaigns : null);
+  const campaignsQ = useApi<{ campaigns: Campaign[] }>(tab === "campaigns" || tab === "numbers" ? K.campaigns : null);
   const dncQ = useApi<{ entries: DncEntry[] }>(tab === "dnc" ? K.dnc : null);
   const templates = templatesQ.data?.templates ?? [];
   const agents = agentsQ.data?.agents ?? [];
@@ -349,7 +352,7 @@ export default function VoiceHome({ tab }: { tab: Tab }) {
                   <th className="text-left px-4 py-2">Provider</th>
                   <th className="text-left px-4 py-2">Area code</th>
                   <th className="text-left px-4 py-2">VAPI</th>
-                  <th className="text-left px-4 py-2">Inbound</th>
+                  <th className="text-left px-4 py-2">Inbound — AI answering</th>
                   <th />
                 </tr>
               </thead>
@@ -380,25 +383,23 @@ export default function VoiceHome({ tab }: { tab: Tab }) {
                         <span className="text-xs text-slate-400">HR only</span>
                       )}
                     </td>
-                    <td className="px-4 py-2 text-xs text-slate-500">
-                      {n.inbound_route?.mode === "campaign_agent" ? (
-                        <span className="text-green-700">Answered by campaign agent</span>
-                      ) : n.vapi_phone_number_id ? (
-                        <button
-                          onClick={() => {
-                            if (!confirm(`Send incoming calls on ${formatPhone(n.phone_e164)} to your campaign agent here? This replaces whatever the number does in VAPI today.`)) return;
-                            run(`route-${n.id}`, async () => {
-                              await api(`/voice/phone-numbers/${n.id}/route-inbound`, { method: "POST" });
-                              return `Incoming calls on ${formatPhone(n.phone_e164)} now go to the campaign agent.`;
-                            });
-                          }}
-                          disabled={busy !== null}
-                          className="text-slate-600 hover:text-red-600 underline-offset-2 hover:underline"
-                        >
-                          Unchanged · route here
-                        </button>
+                    <td className="px-4 py-2 text-xs">
+                      {n.vapi_phone_number_id ? (
+                        <InboundControl
+                          number={n}
+                          campaigns={campaigns}
+                          busy={busy === `inbound-${n.id}`}
+                          onSave={(enabled, campaignId) =>
+                            run(`inbound-${n.id}`, async () => {
+                              await api(`/voice/phone-numbers/${n.id}/inbound`, { method: "PUT", body: { enabled, campaignId } });
+                              return enabled
+                                ? `AI now answers calls to ${formatPhone(n.phone_e164)}.`
+                                : `AI answering turned off for ${formatPhone(n.phone_e164)}.`;
+                            })
+                          }
+                        />
                       ) : (
-                        "—"
+                        <span className="text-slate-400">Connect to VAPI first</span>
                       )}
                     </td>
                     <td className="px-4 py-2 text-right">
@@ -485,6 +486,48 @@ export default function VoiceHome({ tab }: { tab: Tab }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Per-number inbound route: which campaign's agent answers, and on/off.
+function InboundControl(props: {
+  number: PhoneNumber;
+  campaigns: Campaign[];
+  busy: boolean;
+  onSave: (enabled: boolean, campaignId: string | null) => void;
+}) {
+  const { number: n, campaigns, busy } = props;
+  const [campaignId, setCampaignId] = useState(n.assigned_campaign_id ?? "");
+  useEffect(() => setCampaignId(n.assigned_campaign_id ?? ""), [n.assigned_campaign_id]);
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        value={campaignId}
+        onChange={(e) => {
+          setCampaignId(e.target.value);
+          if (n.inbound_enabled && e.target.value) props.onSave(true, e.target.value);
+        }}
+        className="border border-slate-300 rounded-md px-2 py-1 text-xs max-w-[11rem]"
+        aria-label="Campaign that answers"
+      >
+        <option value="">Choose campaign…</option>
+        {campaigns.map((c) => (
+          <option key={c.id} value={c.id}>{c.name}</option>
+        ))}
+      </select>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={n.inbound_enabled}
+        disabled={busy || (!n.inbound_enabled && !campaignId)}
+        title={!campaignId ? "Choose a campaign first" : n.inbound_enabled ? "Turn AI answering off" : "Turn AI answering on"}
+        onClick={() => props.onSave(!n.inbound_enabled, campaignId || null)}
+        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-40 ${n.inbound_enabled ? "bg-green-600" : "bg-slate-300"}`}
+      >
+        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${n.inbound_enabled ? "left-[18px]" : "left-0.5"}`} />
+      </button>
+      <span className={n.inbound_enabled ? "text-green-700" : "text-slate-400"}>{busy ? "Saving…" : n.inbound_enabled ? "On" : "Off"}</span>
     </div>
   );
 }

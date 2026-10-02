@@ -7,7 +7,7 @@ export class PublishError extends Error {}
 export async function buildSnapshot(campaignId: string, organizationId: string): Promise<{ snapshot: CampaignSnapshot; agentUpdatedAt: Date }> {
   const c = await pool.query(
     `select c.*, a.id as agent_id, a.name as agent_name, a.system_prompt, a.personality, a.tone, a.greeting, a.ending_behavior,
-            a.faqs, a.objection_handling, a.fallback_behavior, a.transfer_rules, a.temperature, a.llm_model as agent_llm_model,
+            a.faqs, a.objection_handling, a.fallback_behavior, a.transfer_rules, a.temperature, a.llm_model as agent_llm_model, a.llm_provider as agent_llm_provider,
             a.max_call_duration_seconds as agent_max_duration, a.updated_at as agent_updated_at,
             v.provider as voice_provider, v.provider_voice_id, v.name as voice_name
      from campaigns c
@@ -32,6 +32,7 @@ export async function buildSnapshot(campaignId: string, organizationId: string):
     recordingDisclosure: Boolean(r.recording_disclosure),
     maxCallDurationSeconds: r.max_call_duration_seconds ?? r.agent_max_duration ?? 600,
     llmModel: r.agent_llm_model || r.llm_model || "gpt-4o-mini",
+    llmProvider: r.agent_llm_model ? r.agent_llm_provider || "openai" : "openai",
     agent: {
       id: r.agent_id,
       name: r.agent_name,

@@ -9,8 +9,9 @@ import { requirePermission } from "../middleware/permissions.js";
 import { getStorageDriver } from "../services/storageService.js";
 import { controlVapiCall } from "../voiceai/vapiClient.js";
 import { hangUp } from "../voiceai/dialer.js";
+import { refreshFromVapi, reviewCall } from "../voiceai/callReview.js";
 import { publishEvent } from "../services/events.js";
-import { normalizeUsE164 } from "../utils/phone.js";
+import { normalizeE164, normalizeUsE164 } from "../utils/phone.js";
 import { DNC_CODES } from "../services/dispositionsService.js";
 
 export const callsRouter = Router();
@@ -37,6 +38,7 @@ function cdrWhere(q: Record<string, string | undefined>, organizationId: string)
     params.push(value);
     conditions.push(sql(params.length));
   };
+  if (q.ids) add((n) => `c.id = any($${n}::uuid[])`, q.ids.split(",").filter((x) => /^[0-9a-f-]{36}$/i.test(x)));
   if (q.campaignId) add((n) => `c.campaign_id = $${n}`, q.campaignId);
   if (q.agentId) add((n) => `c.agent_id = $${n}`, q.agentId);
   if (q.status) add((n) => `c.status = $${n}`, q.status);
@@ -64,6 +66,7 @@ const CDR_SELECT = `
   select c.id, c.status, c.direction, c.to_number, c.from_number, c.created_at, c.started_at, c.answered_at, c.ended_at,
          c.duration_seconds, c.talk_seconds, c.ended_reason, c.answered, c.voicemail_detected, c.transfer_status,
          c.disposition_source, c.evaluation_score, c.cost_usd, c.campaign_id, c.lead_id,
+         (c.ai_review->>'overallScore')::int as ai_score,
          coalesce(nullif(trim(concat(l.first_name, ' ', l.last_name)), ''), l.business_name) as lead_name,
          l.business_name, a.name as agent_name, cmp.name as campaign_name,
          cd.key as disposition_key, cd.label as disposition_label, cd.color as disposition_color
@@ -98,7 +101,7 @@ callsRouter.get("/export", requirePermission("cdr.export"), async (req: AuthedRe
   const { where, params } = cdrWhere(req.query as Record<string, string | undefined>, req.auth!.organizationId);
   const rows = await pool.query(
     `${CDR_SELECT} left join call_transcripts t on t.call_id = c.id
-     where ${where} order by c.created_at desc limit 50000`.replace("cd.color as disposition_color", "cd.color as disposition_color, t.summary"),
+     where ${where} order by c.created_at desc limit 50000`.replace("cd.color as disposition_color", "cd.color as disposition_color, t.summary, c.ai_review"),
     params
   );
   const csv = stringify(
@@ -122,6 +125,8 @@ callsRouter.get("/export", requirePermission("cdr.export"), async (req: AuthedRe
       talk_seconds: r.talk_seconds,
       ended_reason: r.ended_reason,
       score: r.evaluation_score,
+      ai_review_score: r.ai_review?.overallScore ?? null,
+      sop_adherence: r.ai_review?.sopAdherence?.score ?? null,
       cost_usd: r.cost_usd,
       summary: r.summary,
     })),
@@ -135,7 +140,7 @@ callsRouter.get("/export", requirePermission("cdr.export"), async (req: AuthedRe
 callsRouter.get("/active", async (req: AuthedRequest, res) => {
   const result = await pool.query(
     `select c.id, c.status, c.direction, c.to_number, c.from_number, c.created_at, c.started_at, c.answered_at,
-            c.campaign_id, cmp.name as campaign_name, a.name as agent_name,
+            c.campaign_id, cmp.name as campaign_name, a.name as agent_name, cmp.transfer_number, cmp.transfer_targets,
             coalesce(nullif(trim(concat(l.first_name, ' ', l.last_name)), ''), l.business_name) as lead_name,
             l.business_name, (c.monitor_listen_url is not null) as can_listen, (c.monitor_control_url is not null) as can_control,
             (select turns from call_transcripts t where t.call_id = c.id) as turns
@@ -253,8 +258,8 @@ callsRouter.post("/:id/barge", requirePermission("calls.barge"), async (req: Aut
 callsRouter.post("/:id/transfer", requirePermission("calls.transfer"), async (req: AuthedRequest, res) => {
   const call = await liveCall(req);
   if (!call?.monitor_control_url) return res.status(409).json({ error: "Call is not live or has no control channel." });
-  const target = normalizeUsE164(String(req.body?.transferTo ?? ""));
-  if (!target) return res.status(400).json({ error: "Enter a valid US number to transfer to." });
+  const target = normalizeE164(String(req.body?.transferTo ?? ""));
+  if (!target) return res.status(400).json({ error: "Enter a valid number to transfer to, like +13025550100." });
   try {
     await controlVapiCall(call.monitor_control_url, {
       type: "transfer",
@@ -276,6 +281,57 @@ callsRouter.post("/:id/end", requirePermission("calls.end"), async (req: AuthedR
   await hangUp(call);
   await logEvent(call.id, { type: "ended_by_supervisor", by: req.auth!.userId });
   res.json({ ok: true });
+});
+
+// Bulk actions on selected call records.
+callsRouter.post("/bulk", async (req: AuthedRequest, res) => {
+  const parsed = z.object({ ids: z.array(z.string().uuid()).min(1).max(500), action: z.enum(["delete", "review", "refresh"]) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  const org = req.auth!.organizationId;
+  const { ids, action } = parsed.data;
+  const owned = await pool.query<{ id: string }>(
+    "select id from calls where id = any($1::uuid[]) and organization_id = $2 and status not in ('queued','ringing','answered')",
+    [ids, org]
+  );
+  const mine = owned.rows.map((r) => r.id);
+  if (action === "delete") {
+    if (!["company_admin", "super_admin"].includes(req.auth!.role)) return res.status(403).json({ error: "Only admins can delete call records." });
+    await pool.query("delete from calls where id = any($1::uuid[])", [mine]);
+    return res.json({ message: `Deleted ${mine.length} call record(s).` });
+  }
+  // Review / refresh run in the background; results show up as they finish.
+  const run = action === "review" ? (id: string) => reviewCall(id, { force: true }) : (id: string) => refreshFromVapi(id);
+  (async () => {
+    for (const id of mine) await run(id).catch(() => undefined);
+  })();
+  res.json({ message: `${action === "review" ? "AI review" : "Fetch from VAPI"} started for ${mine.length} call(s).` });
+});
+
+// Re-pull recording, transcript and analysis from VAPI for this call.
+callsRouter.post("/:id/refresh", requirePermission("cdr.view"), async (req: AuthedRequest, res) => {
+  const owned = await pool.query("select id from calls where id = $1 and organization_id = $2", [req.params.id, req.auth!.organizationId]);
+  if (!owned.rows[0]) return res.status(404).json({ error: "Call not found." });
+  try {
+    const ok = await refreshFromVapi(owned.rows[0].id);
+    if (!ok) return res.status(409).json({ error: "VAPI has nothing final for this call yet." });
+    // The recording downloads in the background; give it a moment.
+    res.json({ message: "Fetched from VAPI. The recording appears once it finishes downloading." });
+  } catch (err) {
+    res.status(502).json({ error: (err as Error).message });
+  }
+});
+
+// AI coaching review: how the agent did and what it could have done better.
+callsRouter.post("/:id/review", requirePermission("cdr.view"), async (req: AuthedRequest, res) => {
+  const owned = await pool.query("select id from calls where id = $1 and organization_id = $2", [req.params.id, req.auth!.organizationId]);
+  if (!owned.rows[0]) return res.status(404).json({ error: "Call not found." });
+  try {
+    const review = await reviewCall(owned.rows[0].id, { force: true });
+    if (!review) return res.status(409).json({ error: "There's no conversation on this call to review." });
+    res.json({ review });
+  } catch (err) {
+    res.status(502).json({ error: (err as Error).message });
+  }
 });
 
 // Manual disposition always wins over the engine (disposition_source='manual').
