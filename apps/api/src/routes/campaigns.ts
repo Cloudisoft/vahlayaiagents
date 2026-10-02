@@ -48,6 +48,15 @@ const campaignSchema = z.object({
   leadCooldownHours: z.number().int().min(0).max(720).optional(),
   dialTimeoutSeconds: z.number().int().min(20).max(180).optional(),
   llmModel: z.string().optional(),
+  transferTargets: z
+    .object({
+      sales: z.string().nullable().optional(),
+      support: z.string().nullable().optional(),
+      retention: z.string().nullable().optional(),
+      manager: z.string().nullable().optional(),
+    })
+    .optional(),
+  recordingDisclosure: z.boolean().optional(),
 });
 
 // API field -> column, with optional value transform.
@@ -71,6 +80,12 @@ const COLUMNS: Record<string, [string, ((v: any) => unknown)?]> = {
   leadCooldownHours: ["lead_cooldown_hours"],
   dialTimeoutSeconds: ["dial_timeout_seconds"],
   llmModel: ["llm_model"],
+  transferTargets: [
+    "transfer_targets",
+    (v: Record<string, string | null | undefined>) =>
+      JSON.stringify(Object.fromEntries(Object.entries(v).filter(([, n]) => n && String(n).trim()).map(([k, n]) => [k, String(n).trim()]))),
+  ],
+  recordingDisclosure: ["recording_disclosure"],
 };
 
 function toColumns(data: Record<string, unknown>) {
@@ -98,10 +113,11 @@ const STATS_SQL = `
   (select count(*) from calls where campaign_id = c.id and status in ('queued','ringing','answered'))::int as live_calls,
   (select count(*) from calls where campaign_id = c.id and answered)::int as connected_calls,
   (select count(*) from calls ca join call_dispositions cd on cd.id = ca.disposition_id
-     where ca.campaign_id = c.id and cd.key in ('interested','interested_transferred'))::int as interested_leads,
+     where ca.campaign_id = c.id and cd.key in ('FL','PROPO','XFER','SALE'))::int as interested_leads,
   (select count(*) from calls ca join call_dispositions cd on cd.id = ca.disposition_id
-     where ca.campaign_id = c.id and cd.key = 'appointment_booked')::int as appointments,
-  (select count(*) from calls where campaign_id = c.id and transfer_status = 'completed')::int as transfers,
+     where ca.campaign_id = c.id and cd.key = 'CALLBK')::int as appointments,
+  (select count(*) from calls ca join call_dispositions cd on cd.id = ca.disposition_id
+     where ca.campaign_id = c.id and cd.key = 'XFER')::int as transfers,
   (select count(*) from calls where campaign_id = c.id and voicemail_detected)::int as voicemails,
   (select round(avg(talk_seconds)) from calls where campaign_id = c.id and talk_seconds > 0)::int as avg_talk_seconds,
   (select version from campaign_versions where id = c.published_version_id) as published_version`;

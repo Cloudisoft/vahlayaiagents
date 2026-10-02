@@ -98,7 +98,6 @@ export default function CallHistory() {
     <div className="max-w-7xl space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <Link to="/voice" className="text-xs text-slate-500 hover:text-slate-700">← Voice AI</Link>
           <h1 className="text-2xl font-semibold text-slate-900">Call Records</h1>
         </div>
         {can("cdr.export") && <button onClick={exportCsv} className={btnGhost}>Export CSV</button>}
@@ -120,7 +119,7 @@ export default function CallHistory() {
         </select>
         <select value={f.disposition} onChange={(e) => setF("disposition", e.target.value)} className={inputCls}>
           <option value="">All results</option>
-          {dispositions.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+          {dispositions.map((d) => <option key={d.key} value={d.key}>{d.key} – {d.label}</option>)}
         </select>
         <select value={f.direction} onChange={(e) => setF("direction", e.target.value)} className={inputCls}>
           <option value="">In + out</option>
@@ -172,7 +171,7 @@ export default function CallHistory() {
                 <td className="px-3 py-2 text-slate-500">{c.campaign_name ?? "—"}</td>
                 <td className="px-3 py-2">
                   {c.disposition_label ? (
-                    <DispositionBadge label={c.disposition_label} color={c.disposition_color} manual={c.disposition_source === "manual"} />
+                    <DispositionBadge code={c.disposition_key} label={c.disposition_label} color={c.disposition_color} manual={c.disposition_source === "manual"} />
                   ) : (
                     <span className="text-xs text-slate-500">{c.status}</span>
                   )}
@@ -247,6 +246,7 @@ function CallDrawer({ callId, dispositions, onClose, onChanged }: { callId: stri
               <Info label="Caller ID used">{formatPhone(call.direction === "inbound" ? call.to_number : call.from_number)}</Info>
               <Info label="Campaign">{call.campaign_name ?? "—"}{call.campaign_version ? ` (v${call.campaign_version})` : ""}</Info>
               <Info label="Agent">{call.agent_name ?? "—"}</Info>
+              {call.call_category && <Info label="Category">{call.call_category.replace(/_/g, " ")}</Info>}
               <Info label="Customer">{[call.customer_type?.replace("_", "-").toUpperCase(), call.current_provider].filter(Boolean).join(" · ") || "—"}</Info>
               <Info label="Started">{new Date(call.created_at).toLocaleString()}</Info>
               <Info label="Talk / total">{formatSeconds(call.talk_seconds)} / {formatSeconds(call.duration_seconds)}</Info>
@@ -261,11 +261,11 @@ function CallDrawer({ callId, dispositions, onClose, onChanged }: { callId: stri
             <div>
               <div className="text-xs font-medium text-slate-500 uppercase mb-1">Result</div>
               <div className="flex items-center gap-2">
-                <DispositionBadge label={call.disposition_label} color={call.disposition_color} manual={call.disposition_source === "manual"} />
+                <DispositionBadge code={call.disposition_key} label={call.disposition_label} color={call.disposition_color} manual={call.disposition_source === "manual"} />
                 {can("calls.disposition") && (
                   <select value="" onChange={(e) => e.target.value && setDisposition(e.target.value)} className={`${inputCls} w-auto py-1`}>
                     <option value="">Change…</option>
-                    {dispositions.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+                    {dispositions.map((d) => <option key={d.key} value={d.key}>{d.key} – {d.label}</option>)}
                   </select>
                 )}
               </div>

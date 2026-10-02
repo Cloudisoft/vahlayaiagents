@@ -38,9 +38,9 @@ dashboardRouter.get("/", async (req: AuthedRequest, res) => {
          (select count(*) from calls where organization_id = $1 and created_at >= current_date - interval '7 days') as calls_week,
          (select count(*) from calls where organization_id = $1 and status = 'answered') as connected,
          (select round(avg(duration_seconds)) from calls where organization_id = $1 and duration_seconds is not null) as avg_duration,
-         (select count(*) from calls c join call_dispositions cd on cd.id = c.disposition_id where c.organization_id = $1 and cd.key = 'appointment_booked') as appointments,
+         (select count(*) from calls c join call_dispositions cd on cd.id = c.disposition_id where c.organization_id = $1 and cd.key = 'CALLBK') as appointments,
          (select count(*) from call_transfers ct join calls c on c.id = ct.call_id where c.organization_id = $1) as transfers,
-         (select count(*) from calls c join call_dispositions cd on cd.id = c.disposition_id where c.organization_id = $1 and cd.key = 'interested') as interested,
+         (select count(*) from calls c join call_dispositions cd on cd.id = c.disposition_id where c.organization_id = $1 and cd.key in ('FL','PROPO','XFER','SALE')) as interested,
          (select count(*) from calls where organization_id = $1 and status in ('queued','ringing','answered')) as active_calls`,
       [orgId]
     ),

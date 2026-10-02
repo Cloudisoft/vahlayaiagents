@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 import { pool, withTransaction } from "../db/pool.js";
 import { decideDisposition } from "./dispositionEngine.js";
 import { looksLikeVoicemail } from "./voicemailDetector.js";
+import { DNC_CODES } from "../services/dispositionsService.js";
 import { publishEvent, signalSlotFreed } from "../services/events.js";
 import { getStorageDriver, recordFile } from "../services/storageService.js";
 import { normalizeCallRecording } from "../services/audioProcessingService.js";
@@ -145,7 +146,7 @@ export async function finalizeCall(callId: string, report: CallReport | null, op
         `update campaign_leads set status = $2, next_attempt_at = $3, last_disposition = $4 where id = $1`,
         [
           call.campaign_lead_id,
-          decision.key === "do_not_call" ? "dnc" : decision.retry ? "retry_scheduled" : "done",
+          DNC_CODES.includes(decision.key) ? "dnc" : decision.retry ? "retry_scheduled" : "done",
           decision.nextAttemptAt,
           decision.key,
         ]
@@ -154,10 +155,10 @@ export async function finalizeCall(callId: string, report: CallReport | null, op
     if (call.lead_id) {
       await client.query(
         `update leads set call_status = $2, is_dnc = is_dnc or $3, updated_at = now() where id = $1`,
-        [call.lead_id, decision.key, decision.key === "do_not_call"]
+        [call.lead_id, decision.key, DNC_CODES.includes(decision.key)]
       );
     }
-    if (decision.key === "do_not_call" && call.to_number) {
+    if (DNC_CODES.includes(decision.key) && call.to_number) {
       await client.query(
         `insert into dnc_entries (organization_id, phone_e164, reason) values ($1,$2,'Requested during call')
          on conflict (organization_id, phone_e164) do nothing`,

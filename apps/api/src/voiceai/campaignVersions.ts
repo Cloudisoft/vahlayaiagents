@@ -6,7 +6,7 @@ export class PublishError extends Error {}
 
 export async function buildSnapshot(campaignId: string, organizationId: string): Promise<{ snapshot: CampaignSnapshot; agentUpdatedAt: Date }> {
   const c = await pool.query(
-    `select c.*, a.id as agent_id, a.name as agent_name, a.system_prompt, a.personality, a.tone, a.greeting,
+    `select c.*, a.id as agent_id, a.name as agent_name, a.system_prompt, a.personality, a.tone, a.greeting, a.ending_behavior,
             a.faqs, a.objection_handling, a.fallback_behavior, a.transfer_rules, a.temperature, a.llm_model as agent_llm_model,
             a.max_call_duration_seconds as agent_max_duration, a.updated_at as agent_updated_at,
             v.provider as voice_provider, v.provider_voice_id, v.name as voice_name
@@ -28,6 +28,8 @@ export async function buildSnapshot(campaignId: string, organizationId: string):
     script: r.script ?? "",
     knowledgeText: r.knowledge_text ?? "",
     transferNumber: r.transfer_number,
+    transferTargets: r.transfer_targets ?? {},
+    recordingDisclosure: Boolean(r.recording_disclosure),
     maxCallDurationSeconds: r.max_call_duration_seconds ?? r.agent_max_duration ?? 600,
     llmModel: r.agent_llm_model || r.llm_model || "gpt-4o-mini",
     agent: {
@@ -37,6 +39,7 @@ export async function buildSnapshot(campaignId: string, organizationId: string):
       personality: r.personality,
       tone: r.tone,
       greeting: r.greeting,
+      endingMessage: r.ending_behavior,
       faqs: r.faqs ?? [],
       objectionHandling: r.objection_handling ?? [],
       fallbackBehavior: r.fallback_behavior,

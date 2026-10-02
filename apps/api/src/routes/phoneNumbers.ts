@@ -208,3 +208,14 @@ phoneNumbersRouter.post("/:id/route-inbound", async (req: AuthedRequest, res) =>
     res.status(502).json({ error: (err as Error).message });
   }
 });
+
+// Removes the number from this app only — Twilio and VAPI are not touched.
+phoneNumbersRouter.delete("/:id", async (req: AuthedRequest, res) => {
+  const live = await pool.query(
+    "select 1 from calls where phone_number_id = $1 and status in ('queued','ringing','answered') limit 1",
+    [req.params.id]
+  );
+  if (live.rows.length) return res.status(409).json({ error: "This number has a call in progress." });
+  await pool.query("delete from phone_numbers where id = $1 and organization_id = $2", [req.params.id, req.auth!.organizationId]);
+  res.status(204).end();
+});

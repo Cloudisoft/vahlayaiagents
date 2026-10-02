@@ -164,7 +164,7 @@ export async function importLeads(
         f.first_name ?? null, f.last_name ?? null, f.contact_title ?? null, f.service_address ?? null,
         f.current_provider ?? null, normalizeCustomerType(f.customer_type, f.current_provider),
         parseCount(f.lines_count), parseCount(f.locations_count), parseDate(f.contract_end_date), f.time_zone ?? null,
-        JSON.stringify(custom), isDnc, isDnc ? "do_not_call" : "new",
+        JSON.stringify(custom), isDnc, isDnc ? "DNC" : "NEW",
       ]
     );
     if (campaignId && phoneE164 && !isDnc) {

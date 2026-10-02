@@ -64,8 +64,8 @@ agentsRouter.post("/templates/:key", async (req: AuthedRequest, res) => {
   if (!t) return res.status(404).json({ error: "Template not found." });
   const result = await pool.query(
     `insert into ai_agents (organization_id, name, agent_type, purpose, system_prompt, tone, greeting, faqs,
-       objection_handling, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
+       objection_handling, created_by, ending_behavior, fallback_behavior)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
     [
       req.auth!.organizationId,
       t.name,
@@ -77,6 +77,8 @@ agentsRouter.post("/templates/:key", async (req: AuthedRequest, res) => {
       JSON.stringify(t.faqs),
       JSON.stringify(t.objectionHandling),
       req.auth!.userId,
+      t.endingBehavior ?? null,
+      t.fallbackBehavior ?? null,
     ]
   );
   res.status(201).json({ agent: result.rows[0], suggestedCampaign: t.suggestedCampaign });

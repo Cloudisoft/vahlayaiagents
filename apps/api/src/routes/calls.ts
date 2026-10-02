@@ -10,6 +10,7 @@ import { controlVapiCall } from "../voiceai/vapiClient.js";
 import { hangUp } from "../voiceai/dialer.js";
 import { publishEvent } from "../services/events.js";
 import { normalizeUsE164 } from "../utils/phone.js";
+import { DNC_CODES } from "../services/dispositionsService.js";
 
 export const callsRouter = Router();
 callsRouter.use(requireAuth);
@@ -295,7 +296,7 @@ callsRouter.patch("/:id/disposition", requirePermission("calls.disposition"), as
     );
   }
   if (call.lead_id) await pool.query("update leads set call_status = $2 where id = $1", [call.lead_id, key]);
-  if (key === "do_not_call") {
+  if (DNC_CODES.includes(key)) {
     if (call.to_number) {
       await pool.query(
         "insert into dnc_entries (organization_id, phone_e164, reason) values ($1,$2,'Manual disposition') on conflict do nothing",
@@ -326,7 +327,7 @@ callsRouter.post("/dnc/list", requirePermission("calls.disposition"), async (req
     "insert into dnc_entries (organization_id, phone_e164, reason) values ($1,$2,$3) on conflict do nothing",
     [org, phone, typeof req.body?.reason === "string" ? req.body.reason : "Added manually"]
   );
-  await pool.query("update leads set is_dnc = true, call_status = 'do_not_call' where organization_id = $1 and main_phone_e164 = $2", [org, phone]);
+  await pool.query("update leads set is_dnc = true, call_status = 'DNC' where organization_id = $1 and main_phone_e164 = $2", [org, phone]);
   res.status(201).json({ ok: true });
 });
 

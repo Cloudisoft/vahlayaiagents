@@ -6,6 +6,7 @@ import { loadPublishedSnapshot } from "./campaignVersions.js";
 import { createVapiCall, getVapiCall, controlVapiCall } from "./vapiClient.js";
 import { finalizeCall, reportFromVapi } from "./callFinalizer.js";
 import { isWithinWindow, parseWindow, resolveTimeZone } from "./callingWindow.js";
+import { CALLBACK_CODES } from "../services/dispositionsService.js";
 import { publishEvent, subscribe, DIALER_CHANNEL } from "../services/events.js";
 import { getTelephonyProvider } from "../telephony/index.js";
 
@@ -161,11 +162,11 @@ async function dialCampaignInner(campaignId: string): Promise<number> {
     ]);
     if (lead.is_dnc || dnc.rows.length > 0) {
       await pool.query("update campaign_leads set status = 'dnc' where id = $1", [lead.campaign_lead_id]);
-      await pool.query("update leads set call_status = 'do_not_call', is_dnc = true where id = $1", [lead.id]);
+      await pool.query("update leads set call_status = 'DNC', is_dnc = true where id = $1", [lead.id]);
       continue;
     }
 
-    const isCallback = ["callback", "decision_maker_callback"].includes(lead.last_disposition);
+    const isCallback = CALLBACK_CODES.includes(lead.last_disposition);
     if (lead.cl_attempts >= campaign.max_attempts && !isCallback) {
       await pool.query("update campaign_leads set status = 'done' where id = $1", [lead.campaign_lead_id]);
       continue;
@@ -234,7 +235,7 @@ async function dialCampaignInner(campaignId: string): Promise<number> {
         [callId, vapiCall.id, vapiCall.phoneCallProviderId ?? null, vapiCall.monitor?.listenUrl ?? null, vapiCall.monitor?.controlUrl ?? null]
       );
       await pool.query("update campaign_leads set attempts = attempts + 1 where id = $1", [lead.campaign_lead_id]);
-      await pool.query("update leads set attempts = attempts + 1, last_called_at = now(), call_status = 'calling' where id = $1", [lead.id]);
+      await pool.query("update leads set attempts = attempts + 1, last_called_at = now(), call_status = 'INCALL' where id = $1", [lead.id]);
       await pool.query("update campaign_phone_numbers set last_used_at = now() where campaign_id = $1 and phone_number_id = $2", [
         campaignId,
         number.id,

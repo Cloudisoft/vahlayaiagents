@@ -259,7 +259,6 @@ export default function LiveCalls() {
     <div className="max-w-7xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <Link to="/voice" className="text-xs text-slate-500 hover:text-slate-700">← Voice AI</Link>
           <h1 className="text-2xl font-semibold text-slate-900">Live Monitor</h1>
         </div>
         <div className="flex items-center gap-4 text-sm">

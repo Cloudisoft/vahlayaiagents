@@ -1,4 +1,4 @@
-import { AI_OUTCOME_KEYS } from "../services/dispositionsService.js";
+import { AI_OUTCOME_KEYS, AI_OUTCOMES } from "../services/dispositionsService.js";
 import { cleanIntroName, leadTemplateVars, renderTemplate, spokenAgentName } from "./placeholders.js";
 import { vapiServerUrl, vapiWebhookSecret } from "./vapiClient.js";
 
@@ -12,6 +12,9 @@ export interface CampaignSnapshot {
   script: string;
   knowledgeText: string;
   transferNumber: string | null;
+  // Department lines from the escalation matrix; optional on older versions.
+  transferTargets?: Partial<Record<TransferDept, string>>;
+  recordingDisclosure?: boolean;
   maxCallDurationSeconds: number;
   llmModel: string;
   agent: {
@@ -21,6 +24,7 @@ export interface CampaignSnapshot {
     personality: string | null;
     tone: string;
     greeting: string | null;
+    endingMessage?: string | null;
     faqs: Array<{ question: string; answer: string }>;
     objectionHandling: Array<{ objection: string; response: string }>;
     fallbackBehavior: string | null;
@@ -85,6 +89,45 @@ function describeLead(lead: Record<string, any>, localTime: string): string {
   return lines.filter(Boolean).join("\n");
 }
 
+export type TransferDept = "sales" | "support" | "retention" | "manager";
+
+const DEPT_WHEN: Record<TransferDept, string> = {
+  sales: "pricing, availability, promotions, contract questions or a new sale the caller agreed to",
+  support: "technical issues, billing concerns, outages or installation problems",
+  retention: "cancellation requests, dissatisfied customers or competitor comparisons",
+  manager: "legal concerns, threats, escalated complaints, media inquiries or repeated unresolved issues",
+};
+
+export function transferDestinations(primary: string | null, targets: Partial<Record<TransferDept, string>>) {
+  const out: Array<Record<string, unknown>> = [];
+  const sales = targets.sales || primary;
+  const all: Array<[TransferDept, string | null | undefined]> = [
+    ["sales", sales],
+    ["support", targets.support],
+    ["retention", targets.retention],
+    ["manager", targets.manager],
+  ];
+  for (const [dept, number] of all) {
+    if (!number) continue;
+    out.push({
+      type: "number",
+      number,
+      message: "Please hold while I connect you.",
+      description: `${dept[0].toUpperCase()}${dept.slice(1)} team — transfer for ${DEPT_WHEN[dept]}.`,
+    });
+  }
+  return out;
+}
+
+// "Hi Sam, this is Hari with X. How are you?" ->
+// "Hi Sam, this is Hari with X. This call may be recorded for quality purposes. How are you?"
+export function withDisclosure(greeting: string, enabled: boolean): string {
+  if (!enabled) return greeting;
+  const line = "This call may be recorded for quality purposes.";
+  const m = greeting.match(/^(.*[.!])\s+([^.!?]*\?)$/);
+  return m ? `${m[1]} ${line} ${m[2]}` : `${greeting} ${line}`;
+}
+
 export interface BuiltCall {
   payload: Record<string, any>;
   optionalPaths: string[][];
@@ -142,7 +185,15 @@ export function buildVapiCall(params: {
         parameters: {
           type: "object",
           properties: {
-            outcome: { type: "string", enum: AI_OUTCOME_KEYS },
+            outcome: {
+              type: "string",
+              enum: AI_OUTCOME_KEYS,
+              description: AI_OUTCOMES.map((o) => `${o.key}: ${o.ai}`).join(" | "),
+            },
+            call_category: {
+              type: "string",
+              enum: ["business", "residential", "existing_customer", "new_prospect", "technical_support", "billing", "retention", "survey"],
+            },
             notes: { type: "string" },
             current_provider: { type: "string" },
             customer_type: { type: "string", enum: ["alc", "non_alc"] },
@@ -197,20 +248,36 @@ export function buildVapiCall(params: {
     {
       type: "function",
       function: {
+        name: "record_survey",
+        description: "Record survey answers when the caller agrees to a short satisfaction survey.",
+        parameters: {
+          type: "object",
+          properties: {
+            satisfaction: { type: "number", description: "1 (very unsatisfied) to 5 (very satisfied)" },
+            would_recommend: { type: "boolean" },
+            improvement: { type: "string", description: "What we can improve, in the caller's words" },
+          },
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "search_knowledge_base",
         description: "Look up facts about plans, pricing, promotions, features and availability. Use instead of guessing.",
         parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
       },
     },
   ];
-  if (transferNumber) {
+  const destinations = transferDestinations(transferNumber, s.transferTargets ?? {});
+  if (destinations.length) {
     tools.push({
       type: "transferCall",
-      destinations: [{ type: "number", number: transferNumber, message: "Transferring you now." }],
+      destinations,
     });
   }
 
-  const greeting = renderTemplate(s.agent.greeting || DEFAULT_GREETING, vars);
+  const greeting = withDisclosure(renderTemplate(s.agent.greeting || DEFAULT_GREETING, vars), Boolean(s.recordingDisclosure));
 
   const assistant: Record<string, any> = {
     name: `${introName} – ${agentName}`.slice(0, 40),
@@ -243,7 +310,7 @@ export function buildVapiCall(params: {
     silenceTimeoutSeconds: SILENCE_TIMEOUT_SECONDS,
     maxDurationSeconds: s.maxCallDurationSeconds,
     backgroundSound: "office",
-    endCallMessage: "Thanks for your time. Have a great day!",
+    endCallMessage: renderTemplate(s.agent.endingMessage || "Thanks for your time. Have a great day!", vars),
     voicemailDetection: {
       provider: "vapi",
       backoffPlan: { startAtSeconds: 2.5, frequencySeconds: VOICEMAIL_FREQUENCY_MIN_SECONDS, maxRetries: 5 },

@@ -1,9 +1,14 @@
 import rateLimit from "express-rate-limit";
+import { env } from "../config/env.js";
 
-// Auth endpoints: tight limit to slow down credential stuffing/brute force.
+const GUARDED_AUTH = new Set(["/login", "/signup", "/forgot-password", "/reset-password"]);
+
+// Credential endpoints only: session checks (/me) and token refreshes happen
+// on every page load and must not count toward the brute-force budget.
 export const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 20,
+  limit: env.nodeEnv === "production" ? 20 : 500,
+  skip: (req) => req.method !== "POST" || !GUARDED_AUTH.has(req.path),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many attempts. Please try again later." },

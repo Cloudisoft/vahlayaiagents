@@ -17,6 +17,7 @@ interface Form {
   llmModel: string;
   temperature: number;
   fallbackBehavior: string;
+  endingBehavior: string;
   transferNumber: string;
   maxCallDurationSeconds: number;
   faqs: Array<{ question: string; answer: string }>;
@@ -33,6 +34,7 @@ const EMPTY: Form = {
   llmModel: "",
   temperature: 0.4,
   fallbackBehavior: "",
+  endingBehavior: "",
   transferNumber: "",
   maxCallDurationSeconds: 600,
   faqs: [],
@@ -64,6 +66,7 @@ export default function AgentNew() {
         llmModel: a.llm_model ?? "",
         temperature: Number(a.temperature ?? 0.4),
         fallbackBehavior: a.fallback_behavior ?? "",
+        endingBehavior: a.ending_behavior ?? "",
         transferNumber: a.transfer_rules?.transferNumber ?? "",
         maxCallDurationSeconds: a.max_call_duration_seconds ?? 600,
         faqs: a.faqs ?? [],
@@ -89,6 +92,7 @@ export default function AgentNew() {
       llmModel: form.llmModel || null,
       temperature: form.temperature,
       fallbackBehavior: form.fallbackBehavior || null,
+      endingBehavior: form.endingBehavior || undefined,
       transferRules: { transferNumber: form.transferNumber || null },
       maxCallDurationSeconds: form.maxCallDurationSeconds,
       faqs: form.faqs.filter((f) => f.question.trim() && f.answer.trim()),
@@ -112,7 +116,7 @@ export default function AgentNew() {
   async function remove() {
     if (!id || !confirm("Delete this agent? Campaigns using it will need a new agent before they can publish.")) return;
     await api(`/voice/agents/${id}`, { method: "DELETE" });
-    navigate("/voice?tab=agents");
+    navigate("/voice/agents");
   }
 
   return (
@@ -189,6 +193,11 @@ export default function AgentNew() {
             <label className="block text-sm font-medium text-slate-700 mb-1">When unsure, the agent should…</label>
             <input value={form.fallbackBehavior} onChange={(e) => set("fallbackBehavior", e.target.value)} className={inputCls} placeholder="Offer a callback from a specialist" />
           </div>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Closing statement</label>
+          <input value={form.endingBehavior} onChange={(e) => set("endingBehavior", e.target.value)} className={inputCls} placeholder="Thank you for your time today. We appreciate the opportunity to assist you. Have a wonderful day." />
+          <p className="text-xs text-slate-500 mt-1">Spoken right before the agent hangs up.</p>
         </div>
 
         <ListEditor

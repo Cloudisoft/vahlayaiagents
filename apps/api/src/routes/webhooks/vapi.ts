@@ -171,7 +171,11 @@ async function runTool(call: any, name: string, args: Record<string, any>): Prom
     }
     case "set_call_outcome": {
       if (!AI_OUTCOME_KEYS.includes(args.outcome)) return `Unknown outcome. Use one of: ${AI_OUTCOME_KEYS.join(", ")}.`;
-      await pool.query("update calls set ai_outcome = $2 where id = $1", [call.id, args.outcome]);
+      await pool.query("update calls set ai_outcome = $2, call_category = coalesce($3, call_category) where id = $1", [
+        call.id,
+        args.outcome,
+        typeof args.call_category === "string" ? args.call_category.slice(0, 40) : null,
+      ]);
       if (call.lead_id) {
         const contractEnd = /^\d{4}-\d{2}-\d{2}$/.test(args.contract_end_date ?? "") ? args.contract_end_date : null;
         await pool.query(
@@ -191,7 +195,7 @@ async function runTool(call: any, name: string, args: Record<string, any>): Prom
       await pool.query("update calls set callback_at = $2, ai_outcome = $3 where id = $1", [
         call.id,
         at,
-        args.with_decision_maker ? "decision_maker_callback" : "callback",
+        "CALLBK",
       ]);
       return `Callback booked for ${new Intl.DateTimeFormat("en-US", { timeZone: tz, dateStyle: "full", timeStyle: "short" }).format(at)}.`;
     }
@@ -216,6 +220,20 @@ async function runTool(call: any, name: string, args: Record<string, any>): Prom
       );
       if (args.email && !email) return "That email doesn't look complete — read it back to the caller letter by letter and save it again.";
       return "Saved.";
+    }
+    case "record_survey": {
+      const survey = {
+        satisfaction: Number.isFinite(Number(args.satisfaction)) ? Math.min(5, Math.max(1, Math.round(Number(args.satisfaction)))) : null,
+        would_recommend: typeof args.would_recommend === "boolean" ? args.would_recommend : null,
+        improvement: typeof args.improvement === "string" ? args.improvement.slice(0, 1000) : null,
+        at: new Date().toISOString(),
+      };
+      await pool.query(
+        `update calls set call_category = coalesce(call_category, 'survey'),
+           evaluation = coalesce(evaluation, '{}'::jsonb) || jsonb_build_object('survey', $2::jsonb) where id = $1`,
+        [call.id, JSON.stringify(survey)]
+      );
+      return "Survey answers recorded. Thank the caller.";
     }
     case "search_knowledge_base": {
       const snapshot = call.campaign_version_id ? await loadPublishedSnapshot(call.campaign_version_id) : null;

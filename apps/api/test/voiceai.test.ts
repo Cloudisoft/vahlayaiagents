@@ -5,7 +5,7 @@ import { normalizePlaceholders, renderTemplate, spokenAgentName, cleanIntroName,
 import { isWithinWindow, parseWindow, resolveTimeZone, timeZoneForState, zonedLocalToUtc } from "../src/voiceai/callingWindow.js";
 import { looksLikeVoicemail } from "../src/voiceai/voicemailDetector.js";
 import { chunkKnowledge, searchKnowledge } from "../src/voiceai/knowledgeBase.js";
-import { buildVapiCall, VOICEMAIL_BEEP_MAX_SECONDS, VOICEMAIL_FREQUENCY_MIN_SECONDS, type CampaignSnapshot } from "../src/voiceai/assistantBuilder.js";
+import { buildVapiCall, transferDestinations, withDisclosure, VOICEMAIL_BEEP_MAX_SECONDS, VOICEMAIL_FREQUENCY_MIN_SECONDS, type CampaignSnapshot } from "../src/voiceai/assistantBuilder.js";
 import { detectPcmFormat } from "../src/services/realtimeService.js";
 import { mapRow, normalizeCustomerType } from "../src/leadgen/leadImport.js";
 
@@ -21,24 +21,24 @@ const base: CallFacts = {
 };
 
 test("disposition: first matching rule wins in playbook order", () => {
-  assert.equal(classifyCall({ ...base, dncRequested: true, voicemailDetected: true }), "do_not_call");
-  assert.equal(classifyCall({ ...base, voicemailDetected: true, transferStatus: "connected" }), "voicemail");
-  assert.equal(classifyCall({ ...base, transferStatus: "connected", aiOutcome: "interested" }), "interested_transferred");
-  assert.equal(classifyCall({ ...base, transferStatus: "connected" }), "transferred");
-  assert.equal(classifyCall({ ...base, transferStatus: "failed" }), "disconnected_in_transfer");
-  assert.equal(classifyCall({ ...base, endedReason: "twilio-failed-to-connect-call-invalid-number" }), "not_in_service");
+  assert.equal(classifyCall({ ...base, dncRequested: true, voicemailDetected: true }), "DNC");
+  assert.equal(classifyCall({ ...base, voicemailDetected: true, transferStatus: "connected" }), "AA");
+  assert.equal(classifyCall({ ...base, transferStatus: "connected", aiOutcome: "FL" }), "XFER");
+  assert.equal(classifyCall({ ...base, transferStatus: "connected" }), "XFER");
+  assert.equal(classifyCall({ ...base, transferStatus: "failed" }), "DA");
+  assert.equal(classifyCall({ ...base, endedReason: "twilio-failed-to-connect-call-invalid-number" }), "ADC");
 });
 
 test("disposition: unanswered is no-answer even with 'no customer audio'", () => {
-  assert.equal(classifyCall({ ...base, answered: false, customerSpoke: false, endedReason: "customer-did-not-give-microphone-permission-no-customer-audio" }), "no_answer");
-  assert.equal(classifyCall({ ...base, answered: false, endedReason: "customer-busy" }), "busy");
+  assert.equal(classifyCall({ ...base, answered: false, customerSpoke: false, endedReason: "customer-did-not-give-microphone-permission-no-customer-audio" }), "NA");
+  assert.equal(classifyCall({ ...base, answered: false, endedReason: "customer-busy" }), "AB");
 });
 
 test("disposition: answered calls", () => {
-  assert.equal(classifyCall({ ...base, customerSpoke: false, talkSeconds: 3 }), "hung_up");
-  assert.equal(classifyCall({ ...base, endedReason: "pipeline-error-openai", talkSeconds: 4 }), "disconnected");
-  assert.equal(classifyCall({ ...base, aiOutcome: "not_interested" }), "not_interested");
-  assert.equal(classifyCall(base), "connected");
+  assert.equal(classifyCall({ ...base, customerSpoke: false, talkSeconds: 3 }), "HangUp");
+  assert.equal(classifyCall({ ...base, endedReason: "pipeline-error-openai", talkSeconds: 4 }), "DA");
+  assert.equal(classifyCall({ ...base, aiOutcome: "NI" }), "NI");
+  assert.equal(classifyCall(base), "PU");
 });
 
 test("retry rules: no-answer retries until max, voicemail obeys setting, callbacks override cap", () => {
@@ -51,13 +51,13 @@ test("retry rules: no-answer retries until max, voicemail obeys setting, callbac
   assert.equal(decideDisposition({ ...base, voicemailDetected: true }, rules, 1, null, now).retry, false);
   assert.equal(decideDisposition({ ...base, voicemailDetected: true }, { ...rules, retryOnVoicemail: true }, 1, null, now).retry, true);
   const cbAt = new Date("2026-10-03T14:00:00Z");
-  const cb = decideDisposition({ ...base, aiOutcome: "callback" }, rules, 5, cbAt, now);
+  const cb = decideDisposition({ ...base, aiOutcome: "CALLBK" }, rules, 5, cbAt, now);
   assert.deepEqual([cb.retry, cb.nextAttemptAt?.toISOString()], [true, cbAt.toISOString()]);
 });
 
 test("retry rules: manual disposition is never overwritten", () => {
-  const d = decideDisposition({ ...base, dncRequested: true }, { maxAttempts: 3, retryDelayMinutes: 60, retryOnVoicemail: true }, 0, null, new Date(), "interested");
-  assert.equal(d.key, "interested");
+  const d = decideDisposition({ ...base, dncRequested: true }, { maxAttempts: 3, retryDelayMinutes: 60, retryOnVoicemail: true }, 0, null, new Date(), "FL");
+  assert.equal(d.key, "FL");
 });
 
 test("placeholders normalise and unknown ones vanish", () => {
@@ -174,4 +174,16 @@ test("lead import maps telecom headers and keeps custom columns", () => {
   assert.equal(normalizeCustomerType("Non-ALC", "Spectrum"), "non_alc");
   assert.equal(normalizeCustomerType(undefined, "Charter Spectrum"), "alc");
   assert.equal(normalizeCustomerType(undefined, "AT&T"), "non_alc");
+});
+
+test("escalation matrix transfer destinations and recording disclosure", () => {
+  const d = transferDestinations("+13025550100", { support: "+13025550101", manager: "+13025550103" });
+  assert.deepEqual(d.map((x) => x.number), ["+13025550100", "+13025550101", "+13025550103"]);
+  assert.match(String(d[1].description), /^Support team/);
+  assert.equal(transferDestinations(null, {}).length, 0);
+  assert.equal(
+    withDisclosure("Hi Sam, this is Hari with Vahlay. How are you today?", true),
+    "Hi Sam, this is Hari with Vahlay. This call may be recorded for quality purposes. How are you today?"
+  );
+  assert.equal(withDisclosure("Hello there", false), "Hello there");
 });

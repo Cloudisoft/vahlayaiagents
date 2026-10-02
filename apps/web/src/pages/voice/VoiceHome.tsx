@@ -1,16 +1,16 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../../lib/api.js";
 import { StatusPill, btnDark, btnGhost, btnPrimary, formatPhone, formatSeconds, inputCls } from "../../lib/voice.js";
 
 type Tab = "campaigns" | "agents" | "voices" | "numbers" | "dnc";
-const TABS: Array<{ key: Tab; label: string }> = [
-  { key: "campaigns", label: "Campaigns" },
-  { key: "agents", label: "Agents" },
-  { key: "voices", label: "Voices" },
-  { key: "numbers", label: "Numbers" },
-  { key: "dnc", label: "Do Not Call" },
-];
+const TITLES: Record<Tab, string> = {
+  campaigns: "Campaigns",
+  agents: "AI Agents",
+  voices: "Voices",
+  numbers: "Numbers",
+  dnc: "Do Not Call",
+};
 
 interface Agent {
   id: string;
@@ -36,6 +36,7 @@ interface PhoneNumber {
   status: string;
   area_code: string | null;
   vapi_phone_number_id: string | null;
+  inbound_route: { mode?: string } | null;
 }
 interface Campaign {
   id: string;
@@ -61,10 +62,15 @@ interface Available {
   region: string;
 }
 
-export default function VoiceHome() {
+interface Template {
+  key: string;
+  name: string;
+  purpose: string;
+}
+
+export default function VoiceHome({ tab }: { tab: Tab }) {
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const tab = (params.get("tab") as Tab) || "campaigns";
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [voices, setVoices] = useState<Voice[]>([]);
   const [numbers, setNumbers] = useState<PhoneNumber[]>([]);
@@ -113,11 +119,13 @@ export default function VoiceHome() {
     }
   }
 
-  const setTab = (t: Tab) => setParams({ tab: t });
+  useEffect(() => {
+    api<{ templates: Template[] }>("/voice/agents/templates").then((r) => setTemplates(r.templates));
+  }, []);
 
-  async function useTemplate() {
+  async function useTemplate(key: string) {
     await run("template", async () => {
-      const r = await api<{ agent: { id: string } }>("/voice/agents/templates/spectrum_business", { method: "POST" });
+      const r = await api<{ agent: { id: string } }>(`/voice/agents/templates/${key}`, { method: "POST" });
       navigate(`/voice/agents/${r.agent.id}`);
     });
   }
@@ -146,28 +154,7 @@ export default function VoiceHome() {
 
   return (
     <div className="max-w-6xl space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-slate-900">Vahlay Voice AI</h1>
-        <div className="flex gap-2 text-sm">
-          <Link to="/voice/live" className={btnGhost}>Live Monitor</Link>
-          <Link to="/voice/history" className={btnGhost}>Call Records</Link>
-          <Link to="/voice/auditor" className={btnGhost}>Call Auditor</Link>
-        </div>
-      </div>
-
-      <div className="flex gap-1 border-b border-slate-200">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 ${
-              tab === t.key ? "border-red-600 text-red-600" : "border-transparent text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <h1 className="text-2xl font-semibold text-slate-900">{TITLES[tab]}</h1>
 
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
       {message && <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-2">{message}</div>}
@@ -209,11 +196,15 @@ export default function VoiceHome() {
 
       {tab === "agents" && (
         <div>
-          <div className="flex justify-end gap-2 mb-3">
+          <div className="flex flex-wrap justify-end gap-2 mb-3">
             <button onClick={() => run("import", async () => (await api<{ message: string }>("/voice/agents/import-vapi", { method: "POST" })).message)} disabled={busy !== null} className={btnDark}>
               {busy === "import" ? "Importing…" : "Import from VAPI"}
             </button>
-            <button onClick={useTemplate} disabled={busy !== null} className={btnGhost}>Spectrum Business template</button>
+            {templates.map((t) => (
+              <button key={t.key} onClick={() => useTemplate(t.key)} disabled={busy !== null} className={btnGhost} title={t.purpose}>
+                + {t.name}
+              </button>
+            ))}
             <Link to="/voice/agents/new" className={btnPrimary}>+ New Agent</Link>
           </div>
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -306,7 +297,7 @@ export default function VoiceHome() {
       {tab === "numbers" && (
         <div className="space-y-4">
           <p className="text-sm text-slate-500">
-            Campaigns dial through VAPI using your Twilio numbers. Buy local numbers per area code so leads see a familiar caller ID; the dialer prefers a number matching the lead's area code.
+            Campaigns dial out through VAPI using these numbers; the dialer prefers one matching the lead's area code. Only numbers listed here are used — your other Twilio numbers are never touched. Removing a number here doesn't change it in Twilio or VAPI.
           </p>
           <div className="flex flex-wrap items-end justify-between gap-3">
             <form onSubmit={searchNumbers} className="flex items-end gap-2">
@@ -323,9 +314,6 @@ export default function VoiceHome() {
             <div className="flex gap-2">
               <button onClick={() => run("sync-vapi", async () => (await api<{ message: string }>("/voice/phone-numbers/sync-vapi", { method: "POST" })).message)} disabled={busy !== null} className={btnDark}>
                 {busy === "sync-vapi" ? "Syncing…" : "Sync from VAPI"}
-              </button>
-              <button onClick={() => run("sync-twilio", async () => (await api<{ message: string }>("/voice/phone-numbers/sync", { method: "POST", body: { provider: "twilio" } })).message)} disabled={busy !== null} className={btnGhost}>
-                Sync from Twilio
               </button>
               <button onClick={() => run("sync-plivo", async () => (await api<{ message: string }>("/voice/phone-numbers/sync", { method: "POST", body: { provider: "plivo" } })).message)} disabled={busy !== null} className={btnGhost}>
                 Sync Plivo (HR)
@@ -360,7 +348,8 @@ export default function VoiceHome() {
                   <th className="text-left px-4 py-2">Provider</th>
                   <th className="text-left px-4 py-2">Area code</th>
                   <th className="text-left px-4 py-2">VAPI</th>
-                  <th className="text-left px-4 py-2">Status</th>
+                  <th className="text-left px-4 py-2">Inbound</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
@@ -374,10 +363,13 @@ export default function VoiceHome() {
                         <span className="text-xs text-green-700">Connected</span>
                       ) : n.provider === "twilio" ? (
                         <button
-                          onClick={() => run(`connect-${n.id}`, async () => {
+                          onClick={() => {
+                            if (!confirm(`Connect ${formatPhone(n.phone_e164)} to VAPI? VAPI will take over this number's incoming-call settings in Twilio.`)) return;
+                            run(`connect-${n.id}`, async () => {
                             await api(`/voice/phone-numbers/${n.id}/connect-vapi`, { method: "POST" });
                             return `${formatPhone(n.phone_e164)} connected to VAPI.`;
-                          })}
+                          });
+                          }}
                           disabled={busy !== null}
                           className="text-xs text-red-600 font-medium hover:underline"
                         >
@@ -387,11 +379,44 @@ export default function VoiceHome() {
                         <span className="text-xs text-slate-400">HR only</span>
                       )}
                     </td>
-                    <td className="px-4 py-2 text-slate-500">{n.status}</td>
+                    <td className="px-4 py-2 text-xs text-slate-500">
+                      {n.inbound_route?.mode === "campaign_agent" ? (
+                        <span className="text-green-700">Answered by campaign agent</span>
+                      ) : n.vapi_phone_number_id ? (
+                        <button
+                          onClick={() => {
+                            if (!confirm(`Send incoming calls on ${formatPhone(n.phone_e164)} to your campaign agent here? This replaces whatever the number does in VAPI today.`)) return;
+                            run(`route-${n.id}`, async () => {
+                              await api(`/voice/phone-numbers/${n.id}/route-inbound`, { method: "POST" });
+                              return `Incoming calls on ${formatPhone(n.phone_e164)} now go to the campaign agent.`;
+                            });
+                          }}
+                          disabled={busy !== null}
+                          className="text-slate-600 hover:text-red-600 underline-offset-2 hover:underline"
+                        >
+                          Unchanged · route here
+                        </button>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <button
+                        onClick={() => {
+                          if (!confirm(`Remove ${formatPhone(n.phone_e164)} from this app? It stays in Twilio and VAPI.`)) return;
+                          run(`rm-${n.id}`, async () => {
+                            await api(`/voice/phone-numbers/${n.id}`, { method: "DELETE" });
+                          });
+                        }}
+                        className="text-xs text-slate-500 hover:text-red-600"
+                      >
+                        Remove
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {numbers.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500">No numbers yet — sync from VAPI/Twilio or buy one above.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-500">No numbers yet — sync from VAPI/Twilio or buy one above.</td></tr>
                 )}
               </tbody>
             </table>

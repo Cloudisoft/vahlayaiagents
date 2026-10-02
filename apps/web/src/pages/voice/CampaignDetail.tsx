@@ -44,6 +44,8 @@ interface Campaign {
   lead_cooldown_hours: number;
   dial_timeout_seconds: number;
   llm_model: string | null;
+  transfer_targets: Record<string, string>;
+  recording_disclosure: boolean;
   published_version_id: string | null;
   published_at: string | null;
   has_unpublished_changes: boolean;
@@ -119,6 +121,8 @@ const FIELDS = {
   leadCooldownHours: "lead_cooldown_hours",
   dialTimeoutSeconds: "dial_timeout_seconds",
   llmModel: "llm_model",
+  transferTargets: "transfer_targets",
+  recordingDisclosure: "recording_disclosure",
 } as const;
 type FieldKey = keyof typeof FIELDS;
 
@@ -245,7 +249,7 @@ export default function CampaignDetail() {
     <div className="max-w-6xl pb-24">
       <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
         <div>
-          <Link to="/voice" className="text-xs text-slate-500 hover:text-slate-700">← Voice AI</Link>
+          <Link to="/voice/campaigns" className="text-xs text-slate-500 hover:text-slate-700">← Campaigns</Link>
           <div className="flex items-center gap-3 mt-1">
             <h1 className="text-2xl font-semibold text-slate-900">{campaign.name}</h1>
             <StatusPill status={status} />
@@ -359,8 +363,11 @@ export default function CampaignDetail() {
               <Field label="Callback number" hint="Read out when a lead asks how to reach you.">
                 <input value={value("callbackNumber") ?? ""} onChange={(e) => set("callbackNumber", e.target.value)} className={inputCls} placeholder="+13023423925" />
               </Field>
-              <Field label="Transfer number" hint="Interested leads are warm-transferred here.">
-                <input value={value("transferNumber") ?? ""} onChange={(e) => set("transferNumber", e.target.value)} className={inputCls} placeholder="+13025550100" />
+              <Field label="Recording disclosure">
+                <label className="flex items-center gap-2 text-sm text-slate-700 py-2">
+                  <input type="checkbox" checked={Boolean(value("recordingDisclosure"))} onChange={(e) => set("recordingDisclosure", e.target.checked)} />
+                  Say "This call may be recorded for quality purposes." in the opening
+                </label>
               </Field>
               <Field label="Model">
                 <select value={value("llmModel") ?? "gpt-4o-mini"} onChange={(e) => set("llmModel", e.target.value)} className={inputCls}>
@@ -370,6 +377,35 @@ export default function CampaignDetail() {
               <Field label="Max call length (minutes)">
                 <input type="number" min={1} max={60} value={Math.round((value("maxCallDurationSeconds") ?? 600) / 60)} onChange={(e) => set("maxCallDurationSeconds", Number(e.target.value) * 60)} className={inputCls} />
               </Field>
+            </div>
+          </Section>
+
+          <Section title="Transfers (escalation matrix)">
+            <p className="text-xs text-slate-500 -mt-1">The agent picks the team that matches what the caller needs. Leave a team empty and the agent books a callback instead.</p>
+            <div className="grid md:grid-cols-2 gap-4">
+              <Field label="Sales" hint="Pricing, availability, promotions, contracts, new sales.">
+                <input value={value("transferNumber") ?? ""} onChange={(e) => set("transferNumber", e.target.value)} className={inputCls} placeholder="+13025550100" />
+              </Field>
+              {(["support", "retention", "manager"] as const).map((dept) => (
+                <Field
+                  key={dept}
+                  label={dept[0].toUpperCase() + dept.slice(1)}
+                  hint={
+                    dept === "support"
+                      ? "Technical issues, billing, outages, installation."
+                      : dept === "retention"
+                        ? "Cancellations, dissatisfied customers, competitor offers."
+                        : "Legal concerns, threats, escalated complaints, media."
+                  }
+                >
+                  <input
+                    value={(value("transferTargets") ?? {})[dept] ?? ""}
+                    onChange={(e) => set("transferTargets", { ...(value("transferTargets") ?? {}), [dept]: e.target.value })}
+                    className={inputCls}
+                    placeholder="+1…"
+                  />
+                </Field>
+              ))}
             </div>
           </Section>
 
@@ -578,7 +614,7 @@ function NumberPool(props: {
           ))}
           {candidates.length === 0 && (
             <div className="text-sm text-slate-500">
-              No other numbers. <Link to="/voice?tab=numbers" className="text-red-600 hover:underline">Buy or sync numbers</Link>.
+              No other numbers. <Link to="/voice/numbers" className="text-red-600 hover:underline">Buy or sync numbers</Link>.
             </div>
           )}
         </div>
@@ -589,6 +625,13 @@ function NumberPool(props: {
 }
 
 const LEAD_STATUSES = ["", "queued", "retry_scheduled", "dialing", "done", "dnc"];
+const LEAD_STATE_CODE: Record<string, string> = {
+  queued: "QUEUE – Lead To Be Called",
+  retry_scheduled: "RQXFER – Re-Queue",
+  dialing: "INCALL – Lead Being Called",
+  done: "Done",
+  dnc: "DNC – Do Not Call",
+};
 
 function LeadsTab({ campaignId, campaignActive, onChanged }: { campaignId: string; campaignActive: boolean; onChanged: () => void }) {
   const [leads, setLeads] = useState<CampaignLead[]>([]);
@@ -698,7 +741,7 @@ function LeadsTab({ campaignId, campaignActive, onChanged }: { campaignId: strin
 
       <div className="flex items-center justify-between">
         <select value={filter} onChange={(e) => setFilter(e.target.value)} className={`${inputCls} w-48`}>
-          {LEAD_STATUSES.map((s) => <option key={s} value={s}>{s ? s.replace("_", " ") : "All statuses"}</option>)}
+          {LEAD_STATUSES.map((s) => <option key={s} value={s}>{s ? LEAD_STATE_CODE[s] : "All statuses"}</option>)}
         </select>
         {selected.length > 0 && <button onClick={removeSelected} className={btnGhost}>Remove {selected.length} selected</button>}
       </div>
@@ -731,9 +774,9 @@ function LeadsTab({ campaignId, campaignActive, onChanged }: { campaignId: strin
                   </td>
                   <td className="px-3 py-2 text-slate-600">{formatPhone(l.main_phone_e164)}{l.is_dnc && <span className="ml-1 text-xs text-red-600">DNC</span>}</td>
                   <td className="px-3 py-2 text-slate-500">{l.state ?? "—"}</td>
-                  <td className="px-3 py-2 text-slate-600">{l.status.replace("_", " ")}</td>
+                  <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{LEAD_STATE_CODE[l.status] ?? l.status}</td>
                   <td className="px-3 py-2 text-slate-600">{l.attempts}</td>
-                  <td className="px-3 py-2">{d ? <DispositionBadge label={d.label} color={d.color} /> : l.last_disposition ?? "—"}</td>
+                  <td className="px-3 py-2">{d ? <DispositionBadge code={l.last_disposition} label={d.label} color={d.color} /> : l.last_disposition ?? "—"}</td>
                   <td className="px-3 py-2 text-xs text-slate-500">{l.next_attempt_at ? new Date(l.next_attempt_at).toLocaleString() : "—"}</td>
                 </tr>
               );

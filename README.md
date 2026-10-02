@@ -157,9 +157,16 @@ from the campaign's *published* version.
   them to finish, checks in after 7 s of silence, hangs up on answering
   machines without leaving a voicemail, warm transfer, DNC requests honoured mid-call,
   callbacks booked in the lead's time zone, live knowledge-base lookups.
-- *Dispositions*: one per call, first match wins (DNC → voicemail →
-  transferred → disconnected in transfer → not in service → busy/no answer
-  → hung up → disconnected → AI outcome). Manual dispositions always win.
+- *Dispositions*: Vahlay's dial status codes. One per call, first match wins:
+  DNC → AA (answering machine) → XFER (transferred) → DA (transfer dropped /
+  dead call) → ADC (invalid number) → AB / NA (busy / no answer) → HangUp →
+  the agent's outcome (NI, DEC, CALLBK, FL, PROPO, ALC, CORPO, NoQua, WN, LNG,
+  SU, NoAvl, CBNG, NP) → PU. Manual dispositions always win. Lead states use
+  the active codes (NEW, QUEUE, INCALL, RQXFER).
+- *Hari (Vahlay SOP v1.0)*: agent template following the SOP's call paths,
+  qualification questions and escalation matrix — campaigns hold separate
+  Sales / Support / Retention / Manager transfer numbers, an optional
+  recording disclosure, call categories and survey capture.
 - *Reliability*: missed webhooks are covered by sweeps that reconcile with
   VAPI, close calls that never rang, and hang up stuck calls.
 - *Live Monitor*: live transcripts, listen-in (server-relayed audio — VAPI's

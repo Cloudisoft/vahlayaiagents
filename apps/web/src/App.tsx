@@ -22,6 +22,12 @@ import CampaignDetail from "./pages/voice/CampaignDetail.js";
 import LiveCalls from "./pages/voice/LiveCalls.js";
 import CallHistory from "./pages/voice/CallHistory.js";
 import AuditorHome from "./pages/auditor/AuditorHome.js";
+import VoiceDashboard from "./pages/voice/VoiceDashboard.js";
+import Analytics from "./pages/voice/Analytics.js";
+import Callbacks from "./pages/voice/Callbacks.js";
+import VoiceLeads from "./pages/voice/VoiceLeads.js";
+import Dispositions from "./pages/voice/Dispositions.js";
+import VoiceLayout from "./components/VoiceLayout.js";
 import ProtectedRoute from "./components/ProtectedRoute.js";
 import Navbar from "./components/Navbar.js";
 
@@ -39,6 +45,15 @@ function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
       <main className="max-w-6xl mx-auto p-6">{children}</main>
+    </div>
+  );
+}
+
+function VoiceShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <Navbar />
+      <VoiceLayout>{children}</VoiceLayout>
     </div>
   );
 }
@@ -126,29 +141,19 @@ export default function App() {
         path="/voice"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <VoiceHome />
-            </AppShell>
+            <VoiceShell>
+              <VoiceDashboard />
+            </VoiceShell>
           </ProtectedRoute>
         }
       />
       <Route
-        path="/voice/agents/new"
+        path="/voice/campaigns"
         element={
           <ProtectedRoute>
-            <AppShell>
-              <AgentNew />
-            </AppShell>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/voice/agents/:id"
-        element={
-          <ProtectedRoute>
-            <AppShell>
-              <AgentNew />
-            </AppShell>
+            <VoiceShell>
+              <VoiceHome tab="campaigns" />
+            </VoiceShell>
           </ProtectedRoute>
         }
       />
@@ -156,9 +161,9 @@ export default function App() {
         path="/voice/campaigns/new"
         element={
           <ProtectedRoute>
-            <AppShell>
+            <VoiceShell>
               <CampaignNew />
-            </AppShell>
+            </VoiceShell>
           </ProtectedRoute>
         }
       />
@@ -166,9 +171,19 @@ export default function App() {
         path="/voice/campaigns/:id"
         element={
           <ProtectedRoute>
-            <AppShell>
+            <VoiceShell>
               <CampaignDetail />
-            </AppShell>
+            </VoiceShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/callbacks"
+        element={
+          <ProtectedRoute>
+            <VoiceShell>
+              <Callbacks />
+            </VoiceShell>
           </ProtectedRoute>
         }
       />
@@ -176,9 +191,19 @@ export default function App() {
         path="/voice/live"
         element={
           <ProtectedRoute>
-            <AppShell>
+            <VoiceShell>
               <LiveCalls />
-            </AppShell>
+            </VoiceShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/leads"
+        element={
+          <ProtectedRoute>
+            <VoiceShell>
+              <VoiceLeads />
+            </VoiceShell>
           </ProtectedRoute>
         }
       />
@@ -186,9 +211,29 @@ export default function App() {
         path="/voice/history"
         element={
           <ProtectedRoute>
-            <AppShell>
+            <VoiceShell>
               <CallHistory />
-            </AppShell>
+            </VoiceShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/analytics"
+        element={
+          <ProtectedRoute>
+            <VoiceShell>
+              <Analytics />
+            </VoiceShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/dispositions"
+        element={
+          <ProtectedRoute>
+            <VoiceShell>
+              <Dispositions />
+            </VoiceShell>
           </ProtectedRoute>
         }
       />
@@ -196,9 +241,69 @@ export default function App() {
         path="/voice/auditor"
         element={
           <ProtectedRoute>
-            <AppShell>
+            <VoiceShell>
               <AuditorHome />
-            </AppShell>
+            </VoiceShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/agents"
+        element={
+          <ProtectedRoute>
+            <VoiceShell>
+              <VoiceHome tab="agents" />
+            </VoiceShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/agents/new"
+        element={
+          <ProtectedRoute>
+            <VoiceShell>
+              <AgentNew />
+            </VoiceShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/agents/:id"
+        element={
+          <ProtectedRoute>
+            <VoiceShell>
+              <AgentNew />
+            </VoiceShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/voices"
+        element={
+          <ProtectedRoute>
+            <VoiceShell>
+              <VoiceHome tab="voices" />
+            </VoiceShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/numbers"
+        element={
+          <ProtectedRoute>
+            <VoiceShell>
+              <VoiceHome tab="numbers" />
+            </VoiceShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/voice/dnc"
+        element={
+          <ProtectedRoute>
+            <VoiceShell>
+              <VoiceHome tab="dnc" />
+            </VoiceShell>
           </ProtectedRoute>
         }
       />
