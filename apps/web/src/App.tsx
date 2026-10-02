@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Link, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
 import Login from "./pages/Login.js";
 import ProtectedRoute from "./components/ProtectedRoute.js";
 import Navbar from "./components/Navbar.js";
@@ -35,7 +35,21 @@ const Dispositions = lazy(() => import("./pages/voice/Dispositions.js"));
 const AuditorHome = lazy(() => import("./pages/auditor/AuditorHome.js"));
 
 function PageFallback() {
-  return <div className="h-1 w-full overflow-hidden"><div className="h-1 w-1/3 bg-red-500/60 animate-pulse" /></div>;
+  return (
+    <div className="fixed top-0 left-0 right-0 z-50 h-0.5 overflow-hidden" aria-hidden>
+      <div className="h-full w-1/3 bg-red-500 animate-progress" />
+    </div>
+  );
+}
+
+// Each page fades up into place; keyed by path so it replays on navigation.
+function PageTransition() {
+  const location = useLocation();
+  return (
+    <div key={location.pathname} className="animate-page-in">
+      <Outlet />
+    </div>
+  );
 }
 
 // Layout routes stay mounted while you move between their pages, so the
@@ -56,7 +70,7 @@ function AppShell() {
         )}
         <main className="max-w-6xl mx-auto p-6">
           <Suspense fallback={<PageFallback />}>
-            <Outlet />
+            <PageTransition />
           </Suspense>
         </main>
       </div>
@@ -71,7 +85,7 @@ function VoiceShell() {
         <Navbar />
         <VoiceLayout>
           <Suspense fallback={<PageFallback />}>
-            <Outlet />
+            <PageTransition />
           </Suspense>
         </VoiceLayout>
       </div>
@@ -101,6 +115,7 @@ export default function App() {
           <Route path="/usage" element={<Usage />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/admin" element={<AdminPanel />} />
+          <Route path="/qc" element={<AuditorHome />} />
         </Route>
 
         <Route path="/voice" element={<VoiceShell />}>
@@ -114,7 +129,7 @@ export default function App() {
           <Route path="history" element={<CallHistory />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="dispositions" element={<Dispositions />} />
-          <Route path="auditor" element={<AuditorHome />} />
+          <Route path="auditor" element={<Navigate to="/qc" replace />} />
           <Route path="agents" element={<VoiceHome key="agents" tab="agents" />} />
           <Route path="agents/new" element={<AgentNew />} />
           <Route path="agents/:id" element={<AgentNew />} />

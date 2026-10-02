@@ -21,7 +21,6 @@ const CHUNKS: Record<string, () => Promise<unknown>> = {
   "/voice/history": () => import("../pages/voice/CallHistory.js"),
   "/voice/analytics": () => import("../pages/voice/Analytics.js"),
   "/voice/dispositions": () => import("../pages/voice/Dispositions.js"),
-  "/voice/auditor": () => import("../pages/auditor/AuditorHome.js"),
   "/voice/agents": () => import("../pages/voice/VoiceHome.js"),
   "/voice/voices": () => import("../pages/voice/VoiceHome.js"),
   "/voice/numbers": () => import("../pages/voice/VoiceHome.js"),
@@ -50,7 +49,6 @@ const SECTIONS: Array<{ title: string; items: NavItem[] }> = [
       { to: "/voice/history", label: "Call Records", icon: "M4 6h16M4 12h16M4 18h10" },
       { to: "/voice/analytics", label: "Analytics", icon: "M4 20V10m6 10V4m6 16v-7m4 7H2" },
       { to: "/voice/dispositions", label: "Dispositions", icon: "M7 7h.01M3 3h8l10 10-8 8L3 11V3z" },
-      { to: "/voice/auditor", label: "Call Auditor", icon: "M9 12l2 2 4-4M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7l8-4z" },
     ],
   },
   {

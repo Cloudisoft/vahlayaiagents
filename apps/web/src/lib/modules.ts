@@ -46,6 +46,6 @@ export const MODULES: ModuleDef[] = [
     subtitle: "AI Call Quality & Compliance Analyst",
     description: "Vahlay QCs evaluates recorded sales calls for quality, compliance, and closing accuracy — delivering objective scores and coaching feedback.",
     icon: "🎧",
-    route: "/voice/auditor",
+    route: "/qc",
   },
 ];

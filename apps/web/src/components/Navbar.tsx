@@ -20,7 +20,7 @@ export default function Navbar() {
   const roleLabel = user ? ROLE_LABELS[user.role] ?? user.role : "";
 
   return (
-    <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between sticky top-0 z-20">
+    <header className="bg-white/85 backdrop-blur supports-[backdrop-filter]:bg-white/70 border-b border-slate-200 px-6 py-3 flex items-center justify-between sticky top-0 z-20">
       <Link to="/" className="flex items-center gap-3">
         <BrandMark size={36} />
         <span className="font-bold text-slate-900 text-lg">VahlaySmartAI</span>

@@ -1,3 +1,85 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "cv11", "ss01";
+  }
+  body {
+    @apply bg-slate-50 text-slate-800;
+  }
+  h1, h2, h3 {
+    letter-spacing: -0.015em;
+  }
+  ::selection {
+    @apply bg-red-100 text-red-900;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-red-300 ring-offset-1;
+  }
+  input[type="file"] {
+    @apply text-sm text-slate-600;
+  }
+  input[type="file"]::file-selector-button {
+    @apply mr-3 cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50;
+  }
+  .tabular-nums,
+  td,
+  th {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  /* Cards and table rows lift gently on hover. */
+  .bg-white.border.rounded-xl {
+    @apply transition-shadow duration-200;
+  }
+  a.bg-white.border.rounded-xl:hover,
+  .card-hover:hover {
+    @apply shadow-md -translate-y-px;
+  }
+  a.bg-white.border.rounded-xl {
+    @apply transition-all duration-200;
+  }
+  tbody tr {
+    @apply transition-colors duration-150;
+  }
+  button,
+  a {
+    @apply transition-colors duration-150;
+  }
+  button:not(:disabled):active {
+    transform: scale(0.98);
+  }
+  .skeleton {
+    @apply rounded-md bg-slate-200/70;
+    background-image: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s linear infinite;
+  }
+  /* Stagger children of a grid as they appear. */
+  .stagger > * {
+    @apply animate-pop-in;
+  }
+  .stagger > *:nth-child(2) { animation-delay: 30ms; }
+  .stagger > *:nth-child(3) { animation-delay: 60ms; }
+  .stagger > *:nth-child(4) { animation-delay: 90ms; }
+  .stagger > *:nth-child(5) { animation-delay: 120ms; }
+  .stagger > *:nth-child(6) { animation-delay: 150ms; }
+  .stagger > *:nth-child(n + 7) { animation-delay: 180ms; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

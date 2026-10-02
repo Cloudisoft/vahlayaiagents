@@ -28,7 +28,7 @@ interface DashboardData {
 
 const SUMMARY: Record<string, (d: DashboardData) => string> = {
   hr: (d) => `${d.hr.open_jobs} open jobs · ${d.hr.applications} applications`,
-  coverage: (d) => `${d.coverage.totalPredictions} lookups · $${d.coverage.budget.remainingUsd.toFixed(2)} budget left`,
+  coverage: (d) => `${d.coverage.totalPredictions} lookups · ${d.coverage.verifiedPredictions} verified`,
   leadgen: (d) => `${d.leadgen.leads_discovered} leads · ${d.leadgen.lead_lists} lists`,
   voice_agents: (d) => `${d.voice.calls_today} calls today · ${d.voice.active_calls} active now`,
   call_auditor: (d) => `${d.auditor.audited} calls audited`,
@@ -81,7 +81,7 @@ export default function Dashboard() {
         <h2 className="text-lg font-semibold text-slate-900">AI Operations</h2>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 stagger">
         {MODULES.map((m) => {
           const orgOn = orgEnabled?.includes(m.key) ?? true;
           const userOk = hasUserAccess(m.key);
@@ -133,7 +133,7 @@ export default function Dashboard() {
                     className={`w-10 h-6 rounded-full transition-colors relative ${orgOn ? "bg-red-600" : "bg-slate-300"}`}
                   >
                     <span
-                      className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                      className={`absolute left-0 top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform duration-200 ${
                         orgOn ? "translate-x-4" : "translate-x-0.5"
                       }`}
                     />

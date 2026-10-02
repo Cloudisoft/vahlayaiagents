@@ -75,7 +75,10 @@ export default function AuditorHome() {
 
   return (
     <div className="max-w-4xl space-y-6">
-      <h1 className="text-2xl font-semibold text-slate-900">AI Call Auditor</h1>
+      <div>
+        <h1 className="text-2xl font-semibold text-slate-900">Vahlay QCs</h1>
+        <p className="text-sm text-slate-500">AI call quality &amp; compliance — score recorded calls and get coaching feedback.</p>
+      </div>
 
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
       {message && <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-2">{message}</div>}

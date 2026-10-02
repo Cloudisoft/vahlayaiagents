@@ -124,14 +124,18 @@ function LeadDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const details: Record<string, unknown> = l?.custom_fields?.call_details ?? {};
   const custom = Object.entries(l?.custom_fields ?? {}).filter(([, v]) => v === null || typeof v !== "object");
   return (
-    <div className="fixed inset-0 z-30 flex justify-end bg-black/20" onClick={onClose}>
-      <div className="w-full max-w-xl h-full bg-white shadow-xl overflow-auto" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-30 flex justify-end bg-black/20 animate-fade-in" onClick={onClose}>
+      <div className="w-full max-w-xl h-full bg-white shadow-xl overflow-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-3 flex items-center justify-between">
           <div className="font-semibold text-slate-900">Lead</div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl">×</button>
         </div>
         {!l ? (
-          <div className="p-5 text-sm text-slate-500">Loading…</div>
+          <div className="p-5"><div className="space-y-3 animate-fade-in" aria-busy="true" aria-label="Loading">
+          <div className="skeleton h-5 w-1/3" />
+          <div className="skeleton h-4 w-2/3" />
+          <div className="skeleton h-24 w-full" />
+        </div></div>
         ) : (
           <div className="p-5 space-y-5 text-sm">
             <div>

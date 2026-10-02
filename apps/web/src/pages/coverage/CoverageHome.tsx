@@ -81,14 +81,13 @@ export default function CoverageHome() {
       <h1 className="text-2xl font-semibold text-slate-900">Vahlay Coverage</h1>
 
       {stats && (
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <StatCard label="Total predictions" value={stats.totalPredictions} />
           <StatCard label="Verified" value={stats.verifiedPredictions} />
           <StatCard
             label="Observed accuracy"
             value={stats.observedAccuracy === null ? "—" : `${(stats.observedAccuracy * 100).toFixed(1)}%`}
           />
-          <StatCard label="Budget remaining" value={`$${stats.budget.remainingUsd.toFixed(2)} / $${stats.budget.budgetUsd.toFixed(2)}`} />
         </div>
       )}
 
@@ -114,7 +113,7 @@ export default function CoverageHome() {
             <div><span className="text-slate-500">Line type: </span>{result.lineType ?? "unknown"}</div>
             <div><span className="text-slate-500">Status: </span>{result.verificationStatus}</div>
             <div><span className="text-slate-500">Confidence: </span>{result.confidence !== null ? `${Math.round(result.confidence * 100)}%` : "—"}</div>
-            {result.budgetExceeded && <div className="text-amber-600">Verification budget exceeded — showing prediction only.</div>}
+            {result.budgetExceeded && <div className="text-amber-600">Live verification unavailable right now — showing prediction only.</div>}
             {result.error && <div className="text-red-600">{result.error}</div>}
           </div>
         )}

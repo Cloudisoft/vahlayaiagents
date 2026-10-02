@@ -59,7 +59,7 @@ export default function VoiceDashboard() {
       </div>
 
       {t && today && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 stagger">
           <Link to="/voice/live"><StatTile label="Live now" value={today.liveCalls} sub="calls in progress" /></Link>
           <StatTile label="Calls today" value={t.calls.toLocaleString()} />
           <StatTile label="Connect rate" value={pct(t.connected, t.calls)} />

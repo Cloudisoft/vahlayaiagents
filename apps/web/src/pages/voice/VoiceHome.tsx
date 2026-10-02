@@ -151,7 +151,11 @@ export default function VoiceHome({ tab }: { tab: Tab }) {
     <div className="max-w-6xl space-y-6">
       <h1 className="text-2xl font-semibold text-slate-900">{TITLES[tab]}</h1>
 
-      {loading && <div className="text-sm text-slate-400">Loading…</div>}
+      {loading && (<div className="space-y-3 animate-fade-in" aria-busy="true" aria-label="Loading">
+          <div className="skeleton h-5 w-1/3" />
+          <div className="skeleton h-4 w-2/3" />
+          <div className="skeleton h-24 w-full" />
+        </div>)}
       {loadError && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{loadError}</div>}
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
       {message && <div className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md p-2">{message}</div>}
@@ -161,7 +165,7 @@ export default function VoiceHome({ tab }: { tab: Tab }) {
           <div className="flex justify-end mb-3">
             <Link to="/voice/campaigns/new" className={btnPrimary}>+ New Campaign</Link>
           </div>
-          <div className="grid md:grid-cols-2 gap-4">
+          <div className="grid md:grid-cols-2 gap-4 stagger">
             {campaigns.map((c) => (
               <Link key={c.id} to={`/voice/campaigns/${c.id}`} onMouseEnter={() => prefetch(K.campaign(c.id))} className="bg-white border border-slate-200 rounded-xl p-4 hover:border-red-300">
                 <div className="flex justify-between items-center mb-1">

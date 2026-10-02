@@ -239,7 +239,11 @@ export default function CampaignDetail() {
   }
 
   if (!campaign) {
-    return <div className="text-sm text-slate-500">{error ?? "Loading…"}</div>;
+    return error ? <div className="text-sm text-red-600">{error}</div> : (<div className="space-y-3 animate-fade-in" aria-busy="true" aria-label="Loading">
+          <div className="skeleton h-5 w-1/3" />
+          <div className="skeleton h-4 w-2/3" />
+          <div className="skeleton h-24 w-full" />
+        </div>);
   }
 
   const window_: CallingWindow = value("callingHours");

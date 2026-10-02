@@ -76,7 +76,7 @@ export default function Analytics() {
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
       {t && data && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 stagger">
             <StatTile label="Calls" value={t.calls.toLocaleString()} />
             <StatTile label="Connected" value={pct(t.connected, t.calls)} sub={`${t.connected.toLocaleString()} answered`} />
             <StatTile label="Conversations" value={t.conversations.toLocaleString()} sub="10s+ with the customer" />

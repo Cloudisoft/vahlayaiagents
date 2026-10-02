@@ -36,7 +36,7 @@ export default function Login() {
           <p className="text-sm text-slate-500 mt-1">Sign in to access your AI Command Center</p>
         </div>
 
-        <form onSubmit={onSubmit} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+        <form onSubmit={onSubmit} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4 animate-pop-in">
           {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
 
           <div>
