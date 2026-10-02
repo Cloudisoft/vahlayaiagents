@@ -1,5 +1,8 @@
 import express from "express";
 import http from "node:http";
+import path from "node:path";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
@@ -30,7 +33,20 @@ import { authRateLimit, publicRateLimit } from "./middleware/rateLimit.js";
 
 const app = express();
 
-app.use(helmet());
+app.set("trust proxy", 1);
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        "default-src": ["'self'"],
+        "connect-src": ["'self'", "wss:", "ws:"],
+        "media-src": ["'self'", "https:", "blob:"],
+        "img-src": ["'self'", "data:", "https:"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+      },
+    },
+  })
+);
 app.use(cors({ origin: env.appUrl, credentials: true }));
 app.use(cookieParser());
 
@@ -63,6 +79,14 @@ app.use("/api/auditor", auditorRouter);
 app.use("/api/dashboard", dashboardRouter);
 app.use("/api/usage", usageRouter);
 app.use("/api/notifications", notificationsRouter);
+
+// In production the API also serves the built web app (same origin, so the
+// refresh cookie and the /ws sockets need no CORS).
+const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");
+if (existsSync(webDist)) {
+  app.use(express.static(webDist, { index: false, maxAge: "1h" }));
+  app.get(/^\/(?!api\/|ws).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
+}
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
