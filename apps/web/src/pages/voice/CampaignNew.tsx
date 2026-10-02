@@ -16,7 +16,7 @@ export default function CampaignNew() {
   const [introName, setIntroName] = useState("");
   const [agents, setAgents] = useState<Array<{ id: string; name: string }>>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [numbers, setNumbers] = useState<Array<{ id: string; phone_e164: string; provider: string; vapi_phone_number_id: string | null }>>([]);
+  const [numbers, setNumbers] = useState<Array<{ id: string; phone_e164: string; provider: string; vapi_phone_number_id: string | null }> | null>(null);
   const [pickedNumbers, setPickedNumbers] = useState<string[]>([]);
   const [catalog, setCatalog] = useState<Array<{ provider: string; label: string; models: string[] }> | null>(null);
   const [model, setModel] = useState("");
@@ -26,11 +26,13 @@ export default function CampaignNew() {
   useEffect(() => {
     api<{ agents: Array<{ id: string; name: string }> }>("/voice/agents").then((r) => setAgents(r.agents));
     api<{ templates: Template[] }>("/voice/agents/templates").then((r) => setTemplates(r.templates));
-    api<{ phoneNumbers: typeof numbers }>("/voice/phone-numbers").then((r) => {
-      const usable = r.phoneNumbers.filter((n) => n.provider !== "plivo");
-      setNumbers(usable);
-      setPickedNumbers(usable.filter((n) => n.vapi_phone_number_id).map((n) => n.id));
-    });
+    api<{ phoneNumbers: NonNullable<typeof numbers> }>("/voice/phone-numbers")
+      .then((r) => {
+        const usable = r.phoneNumbers.filter((n) => n.provider !== "plivo");
+        setNumbers(usable);
+        setPickedNumbers(usable.filter((n) => n.vapi_phone_number_id).map((n) => n.id));
+      })
+      .catch(() => { setNumbers([]); setError("Couldn't load your phone numbers — refresh the page, or add numbers after creating the campaign."); });
     api<{ providers: Array<{ provider: string; label: string; models: string[] }> }>("/voice/agents/models").then((r) => setCatalog(r.providers)).catch(() => setCatalog([]));
   }, []);
 
@@ -92,7 +94,9 @@ export default function CampaignNew() {
         </div>
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">Calling numbers</label>
-          {!numbers.length ? (
+          {numbers === null ? (
+            <p className="text-xs text-slate-500">Loading numbers…</p>
+          ) : !numbers.length ? (
             <p className="text-xs text-slate-500">No numbers yet — add or buy one under Numbers. You can add them later too.</p>
           ) : (
             <div className="space-y-1">
