@@ -16,12 +16,22 @@ export default function CampaignNew() {
   const [introName, setIntroName] = useState("");
   const [agents, setAgents] = useState<Array<{ id: string; name: string }>>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [numbers, setNumbers] = useState<Array<{ id: string; phone_e164: string; provider: string; vapi_phone_number_id: string | null }>>([]);
+  const [pickedNumbers, setPickedNumbers] = useState<string[]>([]);
+  const [catalog, setCatalog] = useState<Array<{ provider: string; label: string; models: string[] }> | null>(null);
+  const [model, setModel] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api<{ agents: Array<{ id: string; name: string }> }>("/voice/agents").then((r) => setAgents(r.agents));
     api<{ templates: Template[] }>("/voice/agents/templates").then((r) => setTemplates(r.templates));
+    api<{ phoneNumbers: typeof numbers }>("/voice/phone-numbers").then((r) => {
+      const usable = r.phoneNumbers.filter((n) => n.provider !== "plivo");
+      setNumbers(usable);
+      setPickedNumbers(usable.filter((n) => n.vapi_phone_number_id).map((n) => n.id));
+    });
+    api<{ providers: Array<{ provider: string; label: string; models: string[] }> }>("/voice/agents/models").then((r) => setCatalog(r.providers)).catch(() => setCatalog([]));
   }, []);
 
   async function onSubmit(e: FormEvent) {
@@ -45,6 +55,11 @@ export default function CampaignNew() {
         method: "POST",
         body: { name, aiAgentId, introName: intro, callbackNumber, knowledgeText },
       });
+      if (pickedNumbers.length) await api(`/voice/campaigns/${campaign.id}/numbers`, { method: "POST", body: { phoneNumberIds: pickedNumbers } });
+      if (model) {
+        const [llmProvider, ...m] = model.split("|");
+        await api(`/voice/campaigns/${campaign.id}`, { method: "PATCH", body: { llmProvider, llmModel: m.join("|") } });
+      }
       navigate(`/voice/campaigns/${campaign.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
@@ -74,6 +89,36 @@ export default function CampaignNew() {
           <label className="block text-sm font-medium text-slate-700 mb-1">Intro name</label>
           <input value={introName} onChange={(e) => setIntroName(e.target.value)} className={inputCls} placeholder="Who the agent says it's calling for" />
           <p className="text-xs text-slate-500 mt-1">Spoken as "this is Ray with <em>intro name</em>". You can change everything else on the next screen.</p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Calling numbers</label>
+          {!numbers.length ? (
+            <p className="text-xs text-slate-500">No numbers yet — add or buy one under Numbers. You can add them later too.</p>
+          ) : (
+            <div className="space-y-1">
+              {numbers.map((n) => (
+                <label key={n.id} className={`flex items-center gap-2 text-sm ${n.vapi_phone_number_id ? "" : "opacity-60"}`}>
+                  <input type="checkbox" disabled={!n.vapi_phone_number_id} checked={pickedNumbers.includes(n.id)} onChange={(e) => setPickedNumbers(e.target.checked ? [...pickedNumbers, n.id] : pickedNumbers.filter((x) => x !== n.id))} />
+                  <span className="tabular-nums">{n.phone_e164}</span>
+                  <span className="text-[11px] text-slate-400 uppercase">{n.provider}</span>
+                  {!n.vapi_phone_number_id && <span className="text-[11px] text-amber-700">not connected to VAPI</span>}
+                </label>
+              ))}
+            </div>
+          )}
+          <p className="text-xs text-slate-500 mt-1">The Twilio numbers this campaign dials from.</p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">AI model (from VAPI)</label>
+          <select value={model} onChange={(e) => setModel(e.target.value)} className={inputCls}>
+            <option value="">Use the agent's model</option>
+            {(catalog ?? []).map((p) => (
+              <optgroup key={p.provider} label={p.provider === "anthropic" ? "Anthropic (Claude)" : p.label}>
+                {p.models.map((m) => <option key={m} value={`${p.provider}|${m}`}>{m}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          <p className="text-xs text-slate-500 mt-1">{catalog === null ? "Loading VAPI's model list…" : "Live list from VAPI, e.g. claude-haiku-4-5-20251001. Checked with VAPI when you save the campaign."}</p>
         </div>
         <button type="submit" disabled={busy} className={btnPrimary}>{busy ? "Creating…" : "Create and configure"}</button>
       </form>

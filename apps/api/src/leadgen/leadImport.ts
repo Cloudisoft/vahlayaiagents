@@ -1,3 +1,4 @@
+import { nameKey, normalizeWebsite } from "./engine/normalize.js";
 import { normalizeE164 } from "../utils/phone.js";
 import { parse } from "csv-parse/sync";
 import ExcelJS from "exceljs";
@@ -83,6 +84,15 @@ export function parseDate(v: string | undefined): string | null {
 }
 
 export async function readRows(buffer: Buffer, filename: string): Promise<Record<string, unknown>[]> {
+  const rows = await readRowsRaw(buffer, filename);
+  if (!rows.length) throw new Error("No rows found. The first row must be column headers (e.g. Business Name, Phone, Email).");
+  return rows;
+}
+
+async function readRowsRaw(buffer: Buffer, filename: string): Promise<Record<string, unknown>[]> {
+  if (/\.xls$/i.test(filename)) throw new Error("Old Excel .xls files aren't supported. Save it as .xlsx or CSV and upload again.");
+  if (!/\.(xlsx|csv|txt|tsv)$/i.test(filename)) throw new Error(`Unsupported file type ${filename.match(/\.[^.]+$/)?.[0] ?? ""}. Upload a CSV or Excel (.xlsx) file.`);
+  if (/\.tsv$/i.test(filename)) return parse(buffer, { columns: true, skip_empty_lines: true, bom: true, relax_column_count: true, delimiter: "\t" });
   if (/\.xlsx$/i.test(filename)) {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(buffer as unknown as ArrayBuffer);
@@ -128,13 +138,16 @@ export async function importLeads(
       continue;
     }
     if (f.main_phone && !phoneE164) errors.push(`Row ${i + 2}: "${f.main_phone}" isn't a valid phone number — imported without a dialable phone.`);
-    if (phoneE164 && (leadListId || campaignId)) {
+    if (phoneE164) {
+      // Same phone in the target list/campaign — or, with neither, anywhere in the org.
       const dup = await pool.query(
         leadListId
           ? "select 1 from leads where organization_id = $1 and lead_list_id = $2 and main_phone_e164 = $3 limit 1"
-          : `select 1 from campaign_leads cl join leads l on l.id = cl.lead_id
-             where l.organization_id = $1 and cl.campaign_id = $2 and l.main_phone_e164 = $3 limit 1`,
-        [org, leadListId ?? campaignId, phoneE164]
+          : campaignId
+            ? `select 1 from campaign_leads cl join leads l on l.id = cl.lead_id
+               where l.organization_id = $1 and cl.campaign_id = $2 and l.main_phone_e164 = $3 limit 1`
+            : "select 1 from leads where organization_id = $1 and $2::text is null and main_phone_e164 = $3 limit 1",
+        [org, leadListId ?? campaignId ?? null, phoneE164]
       );
       if (dup.rows.length) {
         duplicates++;
@@ -156,8 +169,8 @@ export async function importLeads(
       `insert into leads (organization_id, lead_list_id, business_name, address, city, state, zip, website,
          main_phone, main_phone_e164, business_email, industry, source, quality_score,
          first_name, last_name, contact_title, service_address, current_provider, customer_type,
-         lines_count, locations_count, contract_end_date, time_zone, custom_fields, is_dnc, call_status)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$27,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+         lines_count, locations_count, contract_end_date, time_zone, custom_fields, is_dnc, call_status, name_key, website_domain)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$27,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$28,$29)
        returning id`,
       [
         org, leadListId, businessName ?? phoneE164, f.address ?? null, f.city ?? null, f.state ?? null, f.zip ?? null,
@@ -166,6 +179,7 @@ export async function importLeads(
         f.current_provider ?? null, normalizeCustomerType(f.customer_type, f.current_provider),
         parseCount(f.lines_count), parseCount(f.locations_count), parseDate(f.contract_end_date), f.time_zone ?? null,
         JSON.stringify(custom), isDnc, isDnc ? "DNC" : "NEW", opts.source ?? "csv_import",
+        nameKey(String(businessName ?? phoneE164)), normalizeWebsite(f.website).domain,
       ]
     );
     if (campaignId && phoneE164 && !isDnc) {

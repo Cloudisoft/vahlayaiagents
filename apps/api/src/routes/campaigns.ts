@@ -65,7 +65,8 @@ const campaignSchema = z.object({
   retryDelayMinutes: z.number().int().min(5).max(10080).optional(),
   leadCooldownHours: z.number().int().min(0).max(720).optional(),
   dialTimeoutSeconds: z.number().int().min(20).max(180).optional(),
-  llmModel: z.string().optional(),
+  llmModel: z.string().max(100).optional(),
+  llmProvider: z.enum(["openai", "anthropic", "google", "groq"]).nullable().optional(),
   transferTargets: z
     .object({
       sales: phoneField.optional(),
@@ -99,6 +100,7 @@ const COLUMNS: Record<string, [string, ((v: any) => unknown)?]> = {
   leadCooldownHours: ["lead_cooldown_hours"],
   dialTimeoutSeconds: ["dial_timeout_seconds"],
   llmModel: ["llm_model"],
+  llmProvider: ["llm_provider"],
   transferTargets: [
     "transfer_targets",
     (v: Record<string, string | null | undefined>) =>
@@ -230,6 +232,9 @@ campaignsRouter.post("/", async (req: AuthedRequest, res) => {
 campaignsRouter.patch("/:id", async (req: AuthedRequest, res) => {
   const parsed = campaignSchema.partial().safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0].message });
+  // Back to "use the agent's model": drop the campaign's own model too, so a
+  // Claude/Gemini name is never sent to OpenAI.
+  if (parsed.data.llmProvider === null && parsed.data.llmModel === undefined) parsed.data.llmModel = "gpt-4o-mini";
   const { cols, values } = toColumns(parsed.data);
   if (cols.length === 0) return res.status(400).json({ error: "Nothing to update." });
   const sets = cols.map((c, i) => `${c} = $${i + 1}`);

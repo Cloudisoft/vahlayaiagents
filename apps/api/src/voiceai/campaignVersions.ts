@@ -1,5 +1,5 @@
 import { pool, withTransaction } from "../db/pool.js";
-import { checkVapiVoice } from "./vapiClient.js";
+import { checkVapiAssistant, vapiModelCatalog } from "./vapiClient.js";
 import { voiceCredentials } from "../services/cartesiaService.js";
 import { vapiVoiceConfig, type CampaignSnapshot } from "./assistantBuilder.js";
 import { cleanIntroName } from "./placeholders.js";
@@ -34,8 +34,9 @@ export async function buildSnapshot(campaignId: string, organizationId: string):
     recordingDisclosure: Boolean(r.recording_disclosure),
     backgroundSound: r.background_sound !== false,
     maxCallDurationSeconds: r.max_call_duration_seconds ?? r.agent_max_duration ?? 600,
-    llmModel: r.agent_llm_model || r.llm_model || "gpt-4o-mini",
-    llmProvider: r.agent_llm_model ? r.agent_llm_provider || "openai" : "openai",
+    // The campaign's own model choice wins; otherwise the agent's; otherwise OpenAI default.
+    llmModel: r.llm_provider ? r.llm_model : r.agent_llm_model || r.llm_model || "gpt-4o-mini",
+    llmProvider: r.llm_provider ? r.llm_provider : r.agent_llm_model ? r.agent_llm_provider || "openai" : "openai",
     agent: {
       id: r.agent_id,
       name: r.agent_name,
@@ -73,18 +74,27 @@ export async function publishCampaign(campaignId: string, organizationId: string
   if (/REPLACE THE FIGURES/.test(snapshot.knowledgeText)) {
     warnings.push("The knowledge base still has the template's example offer figures. Replace them with your approved offers — the agent quotes only what's there.");
   }
-  if (!snapshot.agent.voice) {
-    warnings.push("No voice is selected for this campaign or its agent; VAPI's default voice will be used.");
-  } else {
-    // The chosen voice is exactly what every call will use, so VAPI must
-    // accept it now — a bad voice would otherwise fail every call.
-    try {
-      const check = await checkVapiVoice(organizationId, vapiVoiceConfig(snapshot.agent.voice), await voiceCredentials(organizationId, snapshot.agent.voice));
-      if (!check.ok) throw new PublishError(`VAPI can't use the voice "${snapshot.agent.voice.name}": ${check.error}. Pick another voice and save again.`);
-    } catch (err) {
-      if (err instanceof PublishError) throw err;
-      warnings.push(`The voice couldn't be checked with VAPI right now (${(err as Error).message.slice(0, 120)}). Saved anyway.`);
-    }
+  if (!snapshot.agent.voice) warnings.push("No voice is selected for this campaign or its agent; VAPI's default voice will be used.");
+  // The model must be one VAPI currently offers for that provider.
+  try {
+    const cat = await vapiModelCatalog();
+    const p = cat.providers.find((x) => x.provider === snapshot.llmProvider);
+    if (p && !p.models.includes(snapshot.llmModel)) throw new PublishError(`VAPI doesn't offer the model "${snapshot.llmModel}" for ${p.label}. Choose another model and save again.`);
+  } catch (err) {
+    if (err instanceof PublishError) throw err;
+  }
+  // The exact model + voice every call will use is checked with VAPI now —
+  // a rejected setting would otherwise fail every call.
+  try {
+    const check = await checkVapiAssistant(organizationId, {
+      model: { provider: snapshot.llmProvider || "openai", model: snapshot.llmModel },
+      ...(snapshot.agent.voice ? { voice: vapiVoiceConfig(snapshot.agent.voice) } : {}),
+      credentials: snapshot.agent.voice ? await voiceCredentials(organizationId, snapshot.agent.voice) : [],
+    });
+    if (!check.ok) throw new PublishError(`VAPI rejected this campaign's model or voice (${snapshot.llmProvider}/${snapshot.llmModel}${snapshot.agent.voice ? `, voice "${snapshot.agent.voice.name}"` : ""}): ${check.error}. Change it and save again.`);
+  } catch (err) {
+    if (err instanceof PublishError) throw err;
+    warnings.push(`The model and voice couldn't be checked with VAPI right now (${(err as Error).message.slice(0, 120)}). Saved anyway.`);
   }
 
   return withTransaction(async (client) => {

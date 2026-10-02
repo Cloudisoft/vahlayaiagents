@@ -242,12 +242,22 @@ export async function deleteVapiAssistant(organizationId: string, id: string): P
 // Asks VAPI to accept this exact voice config (as calls will send it) by
 // creating and deleting a throwaway assistant, so a voice VAPI can't use is
 // caught at Save rather than failing every call.
-export async function checkVapiVoice(organizationId: string, voice: Record<string, unknown>, credentials?: Array<Record<string, string>>): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function checkVapiVoice(organizationId: string, voice: Record<string, unknown>, credentials?: Array<Record<string, string>>) {
+  return checkVapiAssistant(organizationId, { voice, credentials });
+}
+
+// Creates and deletes a throwaway assistant with exactly these settings, so
+// VAPI tells us now (not mid-campaign) if it won't accept them.
+export async function checkVapiAssistant(
+  organizationId: string,
+  cfg: { voice?: Record<string, unknown>; model?: { provider: string; model: string }; credentials?: Array<Record<string, string>> }
+): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const a = await createVapiAssistant(organizationId, {
-      name: "vahlay-voice-check",
-      voice,
-      ...(credentials?.length ? { credentials } : {}),
+      name: "vahlay-config-check",
+      ...(cfg.voice ? { voice: cfg.voice } : {}),
+      ...(cfg.model ? { model: { provider: cfg.model.provider, model: cfg.model.model, messages: [{ role: "system", content: "Configuration check." }] } } : {}),
+      ...(cfg.credentials?.length ? { credentials: cfg.credentials } : {}),
     });
     await deleteVapiAssistant(organizationId, a.id).catch(() => undefined);
     return { ok: true };

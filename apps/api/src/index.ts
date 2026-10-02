@@ -113,7 +113,7 @@ app.use((err: Error & { code?: string }, req: express.Request, res: express.Resp
     return res.status(400).json({ error: "Invalid request." });
   }
   // Upload problems (too large, wrong type) and bad JSON are the client's to fix.
-  if (err.name === "MulterError" || /^(Upload an|Unsupported audio type|Unsupported file)/.test(err.message)) {
+  if (err.name === "MulterError" || /^(Upload an|Unsupported )/.test(err.message)) {
     return res.status(400).json({ error: err.name === "MulterError" && err.code === "LIMIT_FILE_SIZE" ? "That file is too large." : err.message });
   }
   if ((err as any).type === "entity.parse.failed") return res.status(400).json({ error: "Invalid JSON body." });

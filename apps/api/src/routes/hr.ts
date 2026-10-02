@@ -300,10 +300,11 @@ hrRouter.get("/jobs/:id/applications", async (req: AuthedRequest, res) => {
 
 const resumeUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 100 },
+  limits: { fileSize: 40 * 1024 * 1024, files: 100 },
   fileFilter: (_req, file, cb) => cb(null, true), // type checked per file so one bad file doesn't sink the batch
 });
 
+const MAX_RESUME_BYTES = 10 * 1024 * 1024;
 const RESUME_EXT = new Set([".pdf", ".doc", ".docx", ".txt", ".rtf"]);
 
 // Bulk resume upload: each file becomes its own candidate + application,
@@ -320,6 +321,7 @@ hrRouter.post("/jobs/:id/resumes", resumeUpload.array("files", 100), async (req:
     try {
       if (!RESUME_EXT.has(ext)) throw new Error(`Unsupported file type ${ext || "(none)"}. Use PDF, DOC or DOCX.`);
       if (f.size < 200) throw new Error("The file is empty.");
+      if (f.size > MAX_RESUME_BYTES) throw new Error(`Too large (${(f.size / 1048576).toFixed(1)} MB). Resumes can be up to 10 MB.`);
       const sha = crypto.createHash("sha256").update(f.buffer).digest("hex");
       const dup = await pool.query(
         `select a.id from applications a join resumes r on r.id = a.resume_id join files fl on fl.id = r.file_id

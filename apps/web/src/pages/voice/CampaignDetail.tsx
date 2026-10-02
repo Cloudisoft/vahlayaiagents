@@ -100,7 +100,6 @@ interface Version {
 type Tab = "settings" | "numbers" | "leads" | "versions";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const TIME_ZONES = ["America/New_York", "America/Chicago", "America/Denver", "America/Phoenix", "America/Los_Angeles", "America/Anchorage", "Pacific/Honolulu"];
-const MODELS = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"];
 
 // Editable fields, API name -> campaign column.
 const FIELDS = {
@@ -123,6 +122,7 @@ const FIELDS = {
   leadCooldownHours: "lead_cooldown_hours",
   dialTimeoutSeconds: "dial_timeout_seconds",
   llmModel: "llm_model",
+  llmProvider: "llm_provider",
   transferTargets: "transfer_targets",
   recordingDisclosure: "recording_disclosure",
   backgroundSound: "background_sound",
@@ -139,6 +139,7 @@ export default function CampaignDetail() {
   const [agentChanged, setAgentChanged] = useState(false);
   const [tab, setTab] = useState<Tab>("settings");
   const [agents, setAgents] = useState<Array<{ id: string; name: string }>>([]);
+  const [modelCatalog, setModelCatalog] = useState<Array<{ provider: string; label: string; models: string[] }> | null>(null);
   const [voices, setVoices] = useState<Array<{ id: string; name: string }>>([]);
   const [allNumbers, setAllNumbers] = useState<Array<{ id: string; phone_e164: string; provider: string; vapi_phone_number_id: string | null }>>([]);
   const [message, setMessage] = useState<string | null>(null);
@@ -156,6 +157,9 @@ export default function CampaignDetail() {
   useEffect(() => {
     load().catch((err) => setError(err instanceof ApiError ? err.message : "Failed to load campaign."));
     api<{ agents: Array<{ id: string; name: string }> }>("/voice/agents").then((r) => setAgents(r.agents));
+    api<{ providers: Array<{ provider: string; label: string; models: string[] }> }>("/voice/agents/models")
+      .then((r) => setModelCatalog(r.providers))
+      .catch(() => setModelCatalog([]));
     api<{ voices: Array<{ id: string; name: string }> }>("/voice/voices").then((r) => setVoices(r.voices));
     api<{ phoneNumbers: typeof allNumbers }>("/voice/phone-numbers").then((r) => setAllNumbers(r.phoneNumbers));
   }, [id]);
@@ -344,6 +348,7 @@ export default function CampaignDetail() {
 
       {tab === "settings" && (
         <div className="space-y-4">
+          <CallingNumbers campaignId={id!} pool={numbers} all={allNumbers} onChange={() => act("numbers", async () => undefined)} onError={setError} />
           <Section title="Agent & identity">
             <div className="grid md:grid-cols-2 gap-4">
               <Field label="Campaign name"><input value={value("name") ?? ""} onChange={(e) => set("name", e.target.value)} className={inputCls} /></Field>
@@ -378,10 +383,38 @@ export default function CampaignDetail() {
                   Soft office ambience behind the agent so calls sound like a real call center
                 </label>
               </Field>
-              <Field label="Model">
-                <select value={value("llmModel") ?? "gpt-4o-mini"} onChange={(e) => set("llmModel", e.target.value)} className={inputCls}>
-                  {MODELS.map((m) => <option key={m}>{m}</option>)}
-                </select>
+              <Field label="AI model (from VAPI)">
+                {(() => {
+                  const agent = agents.find((a) => a.id === value("aiAgentId")) as { llm_model?: string | null; llm_provider?: string | null } | undefined;
+                  const prov = value("llmProvider") as string | null;
+                  const model = value("llmModel") as string | null;
+                  const current = prov ? `${prov}|${model}` : "";
+                  const known = !prov || modelCatalog?.some((p) => p.provider === prov && p.models.includes(model ?? ""));
+                  return (
+                    <>
+                      <select
+                        value={current}
+                        onChange={(e) => {
+                          const [p, ...m] = e.target.value.split("|");
+                          set("llmProvider", p || null);
+                          if (p) set("llmModel", m.join("|"));
+                        }}
+                        className={inputCls}
+                      >
+                        <option value="">Use the agent's model{agent?.llm_model ? ` (${agent.llm_provider ?? "openai"} · ${agent.llm_model})` : ""}</option>
+                        {!known && prov && <option value={current}>{prov} · {model} (not offered by VAPI anymore)</option>}
+                        {(modelCatalog ?? []).map((p) => (
+                          <optgroup key={p.provider} label={p.provider === "anthropic" ? "Anthropic (Claude)" : p.label}>
+                            {p.models.map((m) => <option key={m} value={`${p.provider}|${m}`}>{m}</option>)}
+                          </optgroup>
+                        ))}
+                      </select>
+                      <span className="text-[11px] text-slate-400">
+                        {modelCatalog === null ? "Loading VAPI's model list…" : modelCatalog.length ? "Live list from VAPI. Saving checks the model with VAPI before any call uses it." : "Couldn't load VAPI's model list right now."}
+                      </span>
+                    </>
+                  );
+                })()}
               </Field>
               <Field label="Max call length (minutes)">
                 <input type="number" min={1} max={60} value={Math.round((value("maxCallDurationSeconds") ?? 600) / 60)} onChange={(e) => set("maxCallDurationSeconds", Number(e.target.value) * 60)} className={inputCls} />
@@ -567,6 +600,55 @@ function ScheduleButton({ timeZone, disabled, onSchedule }: { timeZone: string; 
       <button disabled={disabled || !at} onClick={() => { onSchedule(at); setOpen(false); }} className={btnDark}>Set</button>
       <button onClick={() => setOpen(false)} className="text-xs text-slate-500">Cancel</button>
     </div>
+  );
+}
+
+// Pick which Twilio numbers this campaign dials from — saved immediately.
+function CallingNumbers(props: {
+  campaignId: string;
+  pool: PoolNumber[];
+  all: Array<{ id: string; phone_e164: string; provider: string; vapi_phone_number_id: string | null }>;
+  onChange: () => void;
+  onError: (e: string) => void;
+}) {
+  const inPool = new Set(props.pool.map((n) => n.id));
+  const usable = props.all.filter((n) => n.provider !== "plivo");
+  const [busy, setBusy] = useState<string | null>(null);
+  async function toggle(n: { id: string }, on: boolean) {
+    setBusy(n.id);
+    try {
+      if (on) await api(`/voice/campaigns/${props.campaignId}/numbers`, { method: "POST", body: { phoneNumberIds: [n.id] } });
+      else await api(`/voice/campaigns/${props.campaignId}/numbers/${n.id}`, { method: "DELETE" });
+      props.onChange();
+    } catch (err) {
+      props.onError(err instanceof ApiError ? err.message : "Couldn't update the calling numbers.");
+    } finally {
+      setBusy(null);
+    }
+  }
+  return (
+    <Section title={`Calling numbers (${props.pool.length} selected)`}>
+      <p className="text-xs text-slate-500 -mt-1">Twilio numbers this campaign dials from. The dialer prefers a number with the lead's area code, otherwise the least recently used one. Changes save immediately.</p>
+      {!usable.length ? (
+        <p className="text-sm text-slate-500">No numbers yet. Add or buy one under <Link to="/voice/numbers" className="text-red-600 hover:underline">Numbers</Link>.</p>
+      ) : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {usable.map((n) => {
+            const on = inPool.has(n.id);
+            const ready = Boolean(n.vapi_phone_number_id);
+            return (
+              <label key={n.id} className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${on ? "border-red-300 bg-red-50/60" : "border-slate-200 hover:border-slate-300"} ${busy === n.id ? "opacity-60" : ""}`}>
+                <input type="checkbox" checked={on} disabled={busy !== null || (!ready && !on)} onChange={(e) => toggle(n, e.target.checked)} />
+                <span className="font-medium tabular-nums">{formatPhone(n.phone_e164)}</span>
+                <span className="text-[11px] text-slate-400 uppercase">{n.provider}</span>
+                {!ready && <span className="text-[11px] text-amber-700 ml-auto">not on VAPI — <Link to="/voice/numbers" className="underline">connect</Link></span>}
+              </label>
+            );
+          })}
+        </div>
+      )}
+      {props.pool.length === 0 && usable.length > 0 && <p className="text-xs text-amber-700">Select at least one number — the campaign can't dial without one.</p>}
+    </Section>
   );
 }
 

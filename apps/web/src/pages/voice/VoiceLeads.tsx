@@ -356,7 +356,7 @@ function ImportPanel({ lists, campaigns, busy, onImport }: { lists: LeadList[]; 
         current provider; anything else is kept as a custom field the agent can use. Phones are converted to E.164.
       </div>
       <div className="grid md:grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
-        <input ref={ref} type="file" required accept=".csv,.xlsx,.xls" className="text-sm" />
+        <input ref={ref} type="file" required accept=".csv,.xlsx" className="text-sm" />
         <Target lists={lists} campaigns={campaigns} listId={listId} campaignId={campaignId} setListId={setListId} setCampaignId={setCampaignId} />
         <button disabled={busy} className={btnPrimary}>{busy ? "Importing…" : "Import"}</button>
       </div>

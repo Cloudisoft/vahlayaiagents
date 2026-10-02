@@ -188,7 +188,7 @@ function ImportModal({ lists, listId, onClose, onDone }: { lists: LeadList[]; li
           <Icon d={I.upload} size={22} className="mx-auto text-red-500" />
           <div className="text-sm font-medium text-slate-800 mt-2">{file ? file.name : "Drop a CSV or Excel file, or click to choose"}</div>
           <div className="text-xs text-slate-500">Columns like business name, phone, email, website, city, state are recognised automatically.</div>
-          <input ref={ref} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          <input ref={ref} type="file" accept=".csv,.xlsx" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         </div>
         <label className="block text-xs font-medium text-slate-600">Add to list
           <select className={`${inputCls} mt-1`} value={target} onChange={(e) => setTarget(e.target.value)}>
