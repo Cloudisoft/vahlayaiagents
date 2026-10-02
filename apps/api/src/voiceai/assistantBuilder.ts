@@ -72,7 +72,14 @@ function describeLead(lead: Record<string, any>, localTime: string): string {
     lead.locations_count ? `Locations: ${lead.locations_count}` : null,
     lead.contract_end_date ? `Contract ends: ${lead.contract_end_date}` : null,
     lead.service_address || lead.city ? `Location: ${lead.service_address ?? [lead.city, lead.state].filter(Boolean).join(", ")}` : null,
-    ...Object.entries(lead.custom_fields ?? {}).map(([k, v]) => `${k}: ${v}`),
+    ...Object.entries(lead.custom_fields ?? {})
+      .filter(([, v]) => v === null || typeof v !== "object")
+      .map(([k, v]) => `${k}: ${v}`),
+    lead.custom_fields?.call_details
+      ? `Learned on earlier calls (confirm, don't re-ask): ${Object.entries(lead.custom_fields.call_details)
+          .map(([k, v]) => `${k.replace(/_/g, " ")}: ${Array.isArray(v) ? v.join(", ") : v}`)
+          .join("; ")}`
+      : null,
     `Caller's local date/time: ${localTime}`,
   ];
   return lines.filter(Boolean).join("\n");
@@ -158,6 +165,32 @@ export function buildVapiCall(params: {
             notes: { type: "string" },
           },
           required: ["callback_local_datetime"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "save_lead_details",
+        description:
+          "Save details the caller gives you as soon as you hear them (email, current bill, services, contract, decision maker, install time). Call it again whenever you learn more.",
+        parameters: {
+          type: "object",
+          properties: {
+            email: { type: "string", description: "Spell-checked email address the caller confirmed" },
+            current_provider: { type: "string" },
+            current_services: { type: "array", items: { type: "string", enum: ["internet", "phone", "tv", "mobile"] } },
+            services_with_other_provider: { type: "array", items: { type: "string", enum: ["internet", "phone", "tv", "mobile"] } },
+            current_monthly_bill: { type: "number", description: "USD per month" },
+            contract_months_left: { type: "number" },
+            early_termination_fee: { type: "number", description: "USD" },
+            decision_maker_name: { type: "string" },
+            direct_number: { type: "string" },
+            business_address_confirmed: { type: "boolean" },
+            best_install_time: { type: "string" },
+            bill_copy_requested: { type: "boolean", description: "Caller agreed to email a copy of their current bill" },
+            notes: { type: "string" },
+          },
         },
       },
     },

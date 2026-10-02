@@ -98,6 +98,7 @@ export function leadTemplateVars(params: {
     state: l.state ?? null,
   };
   for (const [k, v] of Object.entries(l.custom_fields ?? {})) {
+    if (v !== null && typeof v === "object") continue;
     vars[canonical(k)] = v == null ? null : String(v);
   }
   return vars;

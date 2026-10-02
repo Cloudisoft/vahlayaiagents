@@ -178,12 +178,32 @@ phoneNumbersRouter.post("/sync-vapi", async (req: AuthedRequest, res) => {
          on conflict (organization_id, phone_e164) do update set vapi_phone_number_id = excluded.vapi_phone_number_id`,
         [org, n.provider === "vapi" ? "vapi" : "twilio", e164, areaCodeOf(e164), n.id]
       );
-      await pointVapiNumberAtServer(org, n.id);
       linked++;
     }
     res.json({
-      message: `Linked ${linked} number(s) from VAPI.` + (skipped.length ? ` Skipped ${skipped.length} without a US number.` : ""),
+      message:
+        `Linked ${linked} number(s) from VAPI. Their inbound settings in VAPI were not changed.` +
+        (skipped.length ? ` Skipped ${skipped.length} without a US number.` : ""),
     });
+  } catch (err) {
+    res.status(502).json({ error: (err as Error).message });
+  }
+});
+
+// Opt-in: send this number's inbound calls (people calling back) to the
+// campaign agent here. Replaces whatever the number does in VAPI today.
+phoneNumbersRouter.post("/:id/route-inbound", async (req: AuthedRequest, res) => {
+  const r = await pool.query("select * from phone_numbers where id = $1 and organization_id = $2", [
+    req.params.id,
+    req.auth!.organizationId,
+  ]);
+  const row = r.rows[0];
+  if (!row) return res.status(404).json({ error: "Phone number not found." });
+  if (!row.vapi_phone_number_id) return res.status(400).json({ error: "This number isn't connected to VAPI." });
+  try {
+    await pointVapiNumberAtServer(req.auth!.organizationId, row.vapi_phone_number_id);
+    await pool.query("update phone_numbers set inbound_route = $2 where id = $1", [row.id, JSON.stringify({ mode: "campaign_agent", since: new Date().toISOString() })]);
+    res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ error: (err as Error).message });
   }

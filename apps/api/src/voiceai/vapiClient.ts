@@ -135,6 +135,9 @@ export async function importTwilioNumberToVapi(params: {
 // rings back gets the assistant for that number's campaign.
 export async function pointVapiNumberAtServer(organizationId: string, vapiPhoneNumberId: string): Promise<void> {
   await request(await resolveVapiKey(organizationId), "PATCH", `/phone-number/${vapiPhoneNumberId}`, {
+    assistantId: null,
+    squadId: null,
+    workflowId: null,
     server: { url: vapiServerUrl(), headers: { "x-vapi-secret": vapiWebhookSecret() } },
   });
 }

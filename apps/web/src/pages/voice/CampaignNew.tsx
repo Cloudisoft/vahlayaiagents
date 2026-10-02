@@ -6,7 +6,7 @@ import { btnPrimary, inputCls } from "../../lib/voice.js";
 interface Template {
   key: string;
   name: string;
-  suggestedCampaign: { introName: string; callbackNumber: string };
+  suggestedCampaign: { introName: string; callbackNumber: string; knowledgeText?: string };
 }
 
 export default function CampaignNew() {
@@ -31,17 +31,19 @@ export default function CampaignNew() {
     try {
       let aiAgentId = agentId || undefined;
       let callbackNumber: string | undefined;
+      let knowledgeText: string | undefined;
       let intro = introName || undefined;
       if (agentId.startsWith("template:")) {
         const key = agentId.slice("template:".length);
         const r = await api<{ agent: { id: string }; suggestedCampaign: Template["suggestedCampaign"] }>(`/voice/agents/templates/${key}`, { method: "POST" });
         aiAgentId = r.agent.id;
         callbackNumber = r.suggestedCampaign.callbackNumber;
+        knowledgeText = r.suggestedCampaign.knowledgeText;
         intro = intro ?? r.suggestedCampaign.introName;
       }
       const { campaign } = await api<{ campaign: { id: string } }>("/voice/campaigns", {
         method: "POST",
-        body: { name, aiAgentId, introName: intro, callbackNumber },
+        body: { name, aiAgentId, introName: intro, callbackNumber, knowledgeText },
       });
       navigate(`/voice/campaigns/${campaign.id}`);
     } catch (err) {

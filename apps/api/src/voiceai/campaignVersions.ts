@@ -63,6 +63,9 @@ export async function publishCampaign(campaignId: string, organizationId: string
   if (Number(pool_.rows[0].count) === 0) {
     warnings.push("No VAPI-connected phone number in this campaign's pool yet — it can't dial until one is added.");
   }
+  if (/REPLACE THE FIGURES/.test(snapshot.knowledgeText)) {
+    warnings.push("The knowledge base still has the template's example offer figures. Replace them with your approved offers — the agent quotes only what's there.");
+  }
   if (!snapshot.agent.voice) warnings.push("The agent has no voice assigned; VAPI's default voice will be used.");
 
   return withTransaction(async (client) => {

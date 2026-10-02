@@ -195,6 +195,28 @@ async function runTool(call: any, name: string, args: Record<string, any>): Prom
       ]);
       return `Callback booked for ${new Intl.DateTimeFormat("en-US", { timeZone: tz, dateStyle: "full", timeStyle: "short" }).format(at)}.`;
     }
+    case "save_lead_details": {
+      if (!call.lead_id) return "Saved.";
+      const details: Record<string, unknown> = {};
+      for (const k of [
+        "current_services", "services_with_other_provider", "current_monthly_bill", "contract_months_left",
+        "early_termination_fee", "decision_maker_name", "direct_number", "business_address_confirmed",
+        "best_install_time", "bill_copy_requested", "notes",
+      ]) {
+        if (args[k] !== undefined && args[k] !== null && args[k] !== "") details[k] = args[k];
+      }
+      const email = typeof args.email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(args.email.trim()) ? args.email.trim().toLowerCase() : null;
+      await pool.query(
+        `update leads set business_email = coalesce($2, business_email), current_provider = coalesce($3, current_provider),
+           custom_fields = coalesce(custom_fields, '{}'::jsonb)
+             || jsonb_build_object('call_details', coalesce(custom_fields->'call_details', '{}'::jsonb) || $4::jsonb),
+           updated_at = now()
+         where id = $1`,
+        [call.lead_id, email, args.current_provider || null, JSON.stringify(details)]
+      );
+      if (args.email && !email) return "That email doesn't look complete — read it back to the caller letter by letter and save it again.";
+      return "Saved.";
+    }
     case "search_knowledge_base": {
       const snapshot = call.campaign_version_id ? await loadPublishedSnapshot(call.campaign_version_id) : null;
       if (!snapshot) return "No knowledge base is available for this call.";
