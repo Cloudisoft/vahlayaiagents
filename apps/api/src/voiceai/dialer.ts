@@ -44,10 +44,15 @@ export async function releaseLease(holder = HOLDER): Promise<void> {
 
 async function logError(organizationId: string | null, source: string, message: string, metadata: object = {}) {
   console.error(`[dialer] ${source}: ${message}`);
-  await pool.query(
-    `insert into system_logs (organization_id, level, source, message, metadata) values ($1,'error',$2,$3,$4)`,
-    [organizationId, source, message, JSON.stringify(metadata)]
-  );
+  // Logging must never take the dialer down (e.g. before migrations finish).
+  await pool
+    .query(`insert into system_logs (organization_id, level, source, message, metadata) values ($1,'error',$2,$3,$4)`, [
+      organizationId,
+      source,
+      message,
+      JSON.stringify(metadata),
+    ])
+    .catch(() => undefined);
 }
 
 async function notify(organizationId: string, type: string, title: string, body: string) {

@@ -2,7 +2,7 @@ import { Readable } from "node:stream";
 import { pool, withTransaction } from "../db/pool.js";
 import { decideDisposition } from "./dispositionEngine.js";
 import { looksLikeVoicemail } from "./voicemailDetector.js";
-import { DNC_CODES } from "../services/dispositionsService.js";
+import { DNC_CODES, ensureDefaultDispositions } from "../services/dispositionsService.js";
 import { publishEvent, signalSlotFreed } from "../services/events.js";
 import { getStorageDriver, recordFile } from "../services/storageService.js";
 import { normalizeCallRecording } from "../services/audioProcessingService.js";
@@ -114,6 +114,7 @@ export async function finalizeCall(callId: string, report: CallReport | null, op
     call.disposition_source === "manual" ? call.existing_disposition_key : null
   );
 
+  await ensureDefaultDispositions(call.organization_id);
   await withTransaction(async (client) => {
     const disp = await client.query<{ id: string }>(
       "select id from call_dispositions where organization_id = $1 and key = $2",

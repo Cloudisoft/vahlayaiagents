@@ -101,17 +101,28 @@ export const CALLBACK_CODES = ["CALLBK", "MNCB"];
 // "Positive" for reporting: the lead is moving forward.
 export const POSITIVE_CODES = ["SALE", "XFER", "CALLBK", "FL", "PROPO"];
 
+const ensured = new Set<string>();
+
+// One bulk upsert per organisation per process; cheap enough to call before
+// any lookup by code (the call finalizer relies on the codes existing).
 export async function ensureDefaultDispositions(organizationId: string): Promise<void> {
-  for (const d of DEFAULT_DISPOSITIONS) {
-    await pool.query(
-      `insert into call_dispositions (organization_id, key, label, is_custom, color, retryable)
-       values ($1, $2, $3, false, $4, $5)
-       on conflict (organization_id, key) do update
-         set label = excluded.label, retryable = excluded.retryable,
-           -- rows created by the code-switch migration still carry label = key and no colour choice
-           color = case when call_dispositions.label = call_dispositions.key then excluded.color else call_dispositions.color end
-         where call_dispositions.is_custom = false`,
-      [organizationId, d.key, d.label, d.color, d.retryable]
-    );
-  }
+  if (ensured.has(organizationId)) return;
+  await pool.query(
+    `insert into call_dispositions (organization_id, key, label, is_custom, color, retryable)
+     select $1, d.key, d.label, false, d.color, d.retryable
+     from unnest($2::text[], $3::text[], $4::text[], $5::boolean[]) as d(key, label, color, retryable)
+     on conflict (organization_id, key) do update
+       set label = excluded.label, retryable = excluded.retryable,
+         -- rows created by the code-switch migration still carry label = key and no colour choice
+         color = case when call_dispositions.label = call_dispositions.key then excluded.color else call_dispositions.color end
+       where call_dispositions.is_custom = false`,
+    [
+      organizationId,
+      DEFAULT_DISPOSITIONS.map((d) => d.key),
+      DEFAULT_DISPOSITIONS.map((d) => d.label),
+      DEFAULT_DISPOSITIONS.map((d) => d.color),
+      DEFAULT_DISPOSITIONS.map((d) => d.retryable),
+    ]
+  );
+  ensured.add(organizationId);
 }
