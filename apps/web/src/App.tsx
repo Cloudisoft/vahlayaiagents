@@ -58,6 +58,7 @@ const BOOT_CHUNKS: Record<string, () => Promise<unknown>> = {
   "/voice/voices": () => import("./pages/voice/VoiceHome.js"),
   "/voice/numbers": () => import("./pages/voice/VoiceHome.js"),
   "/voice/dnc": () => import("./pages/voice/VoiceHome.js"),
+  "/voice/settings": () => import("./pages/Settings.js"),
   "/signup": () => import("./pages/Signup.js"),
 };
 function preloadCurrentRoute() {
@@ -172,6 +173,10 @@ export default function App() {
           <Route path="voices" element={<VoiceHome key="voices" tab="voices" />} />
           <Route path="numbers" element={<VoiceHome key="numbers" tab="numbers" />} />
           <Route path="dnc" element={<VoiceHome key="dnc" tab="dnc" />} />
+          <Route
+            path="settings"
+            element={<Settings title="Voice AI settings" groups={["AI Providers", "Telephony"]} intro="Keys used by Voice AI: VAPI runs the calls, Cartesia provides voices, OpenAI powers call reviews, Twilio supplies numbers. Keys are encrypted and never shown again after saving — saving a provider replaces its current key." />}
+          />
         </Route>
       </Routes>
     </Suspense>

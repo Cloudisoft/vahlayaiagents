@@ -26,6 +26,7 @@ const CHUNKS: Record<string, () => Promise<unknown>> = {
   "/voice/voices": () => import("../pages/voice/VoiceHome.js"),
   "/voice/numbers": () => import("../pages/voice/VoiceHome.js"),
   "/voice/dnc": () => import("../pages/voice/VoiceHome.js"),
+  "/voice/settings": () => import("../pages/Settings.js"),
 };
 
 function warm(to: string) {
@@ -59,6 +60,7 @@ const SECTIONS: Array<{ title: string; items: NavItem[] }> = [
       { to: "/voice/voices", label: "Voices", icon: "M12 2a3 3 0 013 3v6a3 3 0 01-6 0V5a3 3 0 013-3zm7 9a7 7 0 01-14 0m7 7v4" },
       { to: "/voice/numbers", label: "Numbers", icon: "M22 16.9v3a2 2 0 01-2.2 2 19.8 19.8 0 01-8.6-3.1 19.5 19.5 0 01-6-6A19.8 19.8 0 012.1 4.2 2 2 0 014.1 2h3a2 2 0 012 1.7c.1.9.4 1.8.7 2.7a2 2 0 01-.5 2.1L8 9.8a16 16 0 006 6l1.3-1.3a2 2 0 012.1-.4c.9.3 1.8.6 2.7.7a2 2 0 011.7 2z" },
       { to: "/voice/dnc", label: "Do Not Call", icon: "M18.4 5.6L5.6 18.4M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
+      { to: "/voice/settings", label: "Settings", icon: "M12 15a3 3 0 100-6 3 3 0 000 6zm7.4-3a7.4 7.4 0 00-.1-1.2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 00-2-1.2L14.5 3h-4l-.4 2.6a7.6 7.6 0 00-2 1.2l-2.4-1-2 3.4 2 1.6a7.4 7.4 0 000 2.4l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 002 1.2l.4 2.6h4l.4-2.6a7.6 7.6 0 002-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z" },
     ],
   },
 ];

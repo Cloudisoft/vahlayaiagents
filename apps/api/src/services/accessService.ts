@@ -19,6 +19,7 @@ export const MODULE_TABS: Record<string, Array<{ key: string; label: string }>> 
     { key: "voices", label: "Voices" },
     { key: "numbers", label: "Numbers" },
     { key: "dnc", label: "Do Not Call" },
+    { key: "settings", label: "Settings (API keys)" },
   ],
 };
 

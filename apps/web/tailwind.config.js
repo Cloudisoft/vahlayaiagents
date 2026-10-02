@@ -15,10 +15,10 @@ export default {
         "progress-indeterminate": { from: { transform: "translateX(-100%)" }, to: { transform: "translateX(300%)" } },
       },
       animation: {
-        "page-in": "page-in 220ms cubic-bezier(.2,.7,.2,1) both",
+        "page-in": "page-in 220ms cubic-bezier(.2,.7,.2,1) backwards",
         "fade-in": "fade-in 200ms ease-out both",
-        "pop-in": "pop-in 180ms cubic-bezier(.2,.7,.2,1) both",
-        "slide-in-right": "slide-in-right 220ms cubic-bezier(.2,.7,.2,1) both",
+        "pop-in": "pop-in 180ms cubic-bezier(.2,.7,.2,1) backwards",
+        "slide-in-right": "slide-in-right 220ms cubic-bezier(.2,.7,.2,1) backwards",
         shimmer: "shimmer 1.4s linear infinite",
         progress: "progress-indeterminate 1s ease-in-out infinite",
       },

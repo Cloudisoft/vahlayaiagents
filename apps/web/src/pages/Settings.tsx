@@ -61,7 +61,7 @@ const PROVIDER_FIELDS: Record<string, { label: string; group: string; fields: { 
   },
 };
 
-export default function Settings() {
+export default function Settings(props: { title?: string; groups?: string[]; intro?: string } = {}) {
   const [statuses, setStatuses] = useState<ProviderStatus[]>([]);
   const [formState, setFormState] = useState<Record<string, Record<string, string>>>({});
   const [message, setMessage] = useState<string | null>(null);
@@ -96,14 +96,14 @@ export default function Settings() {
     }
   }
 
-  const groups = Array.from(new Set(Object.values(PROVIDER_FIELDS).map((p) => p.group)));
+  const groups = Array.from(new Set(Object.values(PROVIDER_FIELDS).map((p) => p.group))).filter((g) => !props.groups || props.groups.includes(g));
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-2xl font-semibold text-slate-900 mb-1">Settings</h1>
+      <h1 className="text-2xl font-semibold text-slate-900 mb-1">{props.title ?? "Settings"}</h1>
       <p className="text-sm text-slate-500 mb-6">
-        Provider credentials are encrypted at rest and never sent back to the browser. Nothing here fakes a
-        connection — modules that use these providers will show a real error until credentials are saved.
+        {props.intro ??
+          "Provider credentials are encrypted at rest and never sent back to the browser. Nothing here fakes a connection — modules that use these providers will show a real error until credentials are saved."}
       </p>
 
       {error && <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</div>}
@@ -129,6 +129,7 @@ export default function Settings() {
                         {status?.configured ? "Configured" : "Not configured"}
                       </span>
                     </div>
+                    {status?.updatedAt && <div className="text-xs text-slate-400 -mt-2 mb-2">Last saved {new Date(status.updatedAt).toLocaleString()}</div>}
                     <div className="grid grid-cols-2 gap-3 mb-3">
                       {cfg.fields.map((f) => (
                         <div key={f.key}>
@@ -144,7 +145,8 @@ export default function Settings() {
                     </div>
                     <button
                       onClick={() => save(key)}
-                      className="text-sm bg-slate-900 text-white rounded-md px-3 py-1.5 hover:bg-slate-800"
+                      disabled={!cfg.fields.some((f) => (formState[key]?.[f.key] ?? "").trim())}
+                      className="text-sm bg-slate-900 text-white rounded-md px-3 py-1.5 hover:bg-slate-800 disabled:opacity-40"
                     >
                       Save
                     </button>
