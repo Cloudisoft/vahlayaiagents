@@ -22,6 +22,8 @@ export async function geocode(loc: SourceLocation): Promise<Geo> {
   if (loc.zip) params.set("postalcode", loc.zip);
   if (loc.city) params.set("city", loc.city);
   if (loc.state) params.set("state", loc.state);
+  // Nominatim's usage policy: heavy users identify themselves with a contact email.
+  if (process.env.OSM_CONTACT_EMAIL) params.set("email", process.env.OSM_CONTACT_EMAIL);
   if (!loc.zip && !loc.city && !loc.state) throw new PermanentSourceError("OpenStreetMap needs at least a state, city or ZIP code.");
   await throttle("nominatim", 1100);
   const res = await sourceFetch(`${NOMINATIM}/search?${params}`, { label: "OpenStreetMap geocoding", timeoutMs: 20_000 });

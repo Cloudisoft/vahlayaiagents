@@ -35,12 +35,19 @@ export interface Resolution {
   likelyLineType?: LineType;
 }
 
+// Answers are asserted only when measured to be right 93-95% of the time or more.
 export const DEFAULT_ACCURACY_TARGET = 0.93;
+export const TARGET_MIN = 0.93;
+export const TARGET_MAX = 0.95;
 export async function accuracyTarget(organizationId: string): Promise<number> {
   const r = await pool.query("select accuracy_target from coverage_budgets where organization_id = $1", [organizationId]);
   const t = Number(r.rows[0]?.accuracy_target);
-  return Number.isFinite(t) && t > 0.5 && t < 1 ? t : DEFAULT_ACCURACY_TARGET;
+  return Number.isFinite(t) && t > 0 ? Math.min(TARGET_MAX, Math.max(TARGET_MIN, t)) : DEFAULT_ACCURACY_TARGET;
 }
+
+// Audits measure each signal on real numbers. Once a signal has enough of
+// them, its confidence can't exceed what it actually achieved.
+const AUDIT_MIN_SAMPLES = 30;
 
 // Only answers measured to be right at least `target` of the time are
 // classified; the rest say "unknown" with their best guess alongside.
@@ -87,6 +94,7 @@ interface Context {
   npas: Map<string, { dom: LineType; share: number; n: number }>;
   carriers: Map<string, { dominant_type: LineType; confidence: number }>;
   prefixEntities: Map<string, string>; // npa+nxx -> most common licensed company of its top carrier
+  measured: Map<string, number>; // source -> audited accuracy (enough samples only)
   calib: Map<string, number>; // "signal:bucket" -> accuracy
 }
 
@@ -115,6 +123,11 @@ export async function loadContext(e164s: string[]): Promise<Context> {
     ),
     pool.query("select signal, bucket, n, correct from intel_calibration where n >= 30"),
   ]);
+  const audited = await pool.query(
+    `select predicted_source as source, count(*)::int as n, avg(correct::int)::float as acc from intel_quality_samples
+     where kind = 'audit' and created_at > now() - interval '90 days' group by 1 having count(*) >= $1`,
+    [AUDIT_MIN_SAMPLES]
+  );
   const entities = await pool.query(
     `select npa || nxx as k, carrier, carrier_raw, count(*)::int as n from phone_intelligence
      where (npa, nxx) in (select * from unnest($1::text[], $2::text[])) and carrier_raw is not null
@@ -148,6 +161,7 @@ export async function loadContext(e164s: string[]): Promise<Context> {
     carriers: new Map(carriers.rows.map((r) => [r.carrier, { dominant_type: r.dominant_type, confidence: Number(r.confidence) }])),
     calib: new Map(calib.rows.map((r) => [`${r.signal}:${r.bucket}`, r.correct / r.n])),
     prefixEntities: new Map([...prefixEntities].map(([k, v]) => [k, v.name])),
+    measured: new Map(audited.rows.map((r) => [r.source, Number(r.acc)])),
   };
 }
 
@@ -162,6 +176,13 @@ function areaConfidence(ctx: Context, signal: "neighbor" | "area", share: number
 // The lookup hierarchy. Each tier yields a candidate; the first one that is
 // confident enough wins, otherwise the most confident candidate does.
 export function resolveLocal(e164: string, ctx: Context): Resolution {
+  const r = resolveRaw(e164, ctx);
+  const acc = ctx.measured?.get(r.source);
+  if (acc === undefined || r.verified || r.confidence <= acc) return r;
+  return { ...r, confidence: acc, reasons: [...r.reasons, `Capped at ${Math.round(acc * 100)}%: what audits measured for this kind of answer`] };
+}
+
+function resolveRaw(e164: string, ctx: Context): Resolution {
   const pn = npaNxx(e164);
   const base = { phone: e164, npa: pn?.npa ?? null, nxx: pn?.nxx ?? null, verified: false, twilioUsed: false };
   const rec = ctx.phones.get(e164);
@@ -486,6 +507,21 @@ export async function resolveBulk(
       allowance--;
       if (t.resolution.npa) validatedPrefixes.push({ npa: t.resolution.npa, nxx: t.resolution.nxx! });
       if (onProgress && twilio % 25 === 0) await onProgress(twilio);
+    }
+  }
+
+  // Random audits of confident engine answers: the unbiased measure of
+  // what we assert. About 1 in 100, from the audit share of the budget.
+  if (!twilioError && !budgetExceeded) {
+    const confident = [...resolved.entries()].filter(([p, r]) => !r.twilioUsed && !reasons.has(p)).map(([p]) => p);
+    const expected = confident.length * AUDIT_RATE;
+    let audits = Math.min(50, Math.floor(expected) + (Math.random() < expected % 1 ? 1 : 0));
+    while (audits-- > 0 && confident.length && (await auditRoom(organizationId))) {
+      const pick = confident.splice(Math.floor(Math.random() * confident.length), 1)[0];
+      const t = await tryTwilio(organizationId, pick, resolved.get(pick)!, "audit");
+      if (!t.resolution) break;
+      resolved.set(pick, t.resolution);
+      twilio++;
     }
   }
 

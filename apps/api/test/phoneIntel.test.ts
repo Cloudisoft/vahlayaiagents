@@ -116,3 +116,12 @@ test("carrier labels keep the licensed company and its network", async () => {
   assert.equal(label("T-Mobile USA, Inc."), "T-Mobile USA");
   assert.equal(normalizeCarrier("New Cell, Inc. dba Cellcom"), "Cellcom");
 });
+
+test("audits cap a signal's confidence at what it actually achieved", () => {
+  const rec = { line_type: "mobile", carrier: "AT&T Wireless", carrier_raw: "New Cingular Wireless PCS, LLC", observed_at: new Date(), conflicts: 0 };
+  const plain = resolveLocal("+14078565290", ctx({ phones: new Map([["+14078565290", rec]]) }));
+  assert.ok(plain.confidence > 0.95);
+  const capped = resolveLocal("+14078565290", ctx({ phones: new Map([["+14078565290", rec]]), measured: new Map([["phone_record", 0.9]]) }));
+  assert.equal(capped.confidence, 0.9);
+  assert.equal(verificationReason(capped, ctx({ phones: new Map([["+14078565290", rec]]) }), 0.93) !== null, true);
+});

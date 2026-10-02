@@ -61,6 +61,8 @@ interface Stats {
   incorrectPredictions: number;
   observedAccuracy: number | null;
   engineShare30d: number | null;
+  auditSamples: number;
+  accuracyTarget: number;
 }
 
 export default function CoverageHome() {
@@ -173,7 +175,13 @@ export default function CoverageHome() {
           <>
             <StatCard label="Lookups answered" value={stats.totalPredictions.toLocaleString()} icon={I.chart} hint={`${stats.verifiedPredictions.toLocaleString()} verified live`} />
             <StatCard label="Answered by Vahlay engine" value={stats.engineShare30d != null ? `${Math.round(stats.engineShare30d * 100)}%` : "—"} icon={I.shield} hint="last 30 days · Twilio only verifies the rest" />
-            <StatCard label="Accuracy standard" value="93%+" icon={I.check} tone="text-green-600" hint="less certain answers are marked Not classified" />
+            <StatCard
+              label="Measured accuracy"
+              value={stats.auditSamples >= 20 && stats.observedAccuracy != null ? `${(stats.observedAccuracy * 100).toFixed(1)}%` : `${Math.round(stats.accuracyTarget * 100)}–95%`}
+              icon={I.check}
+              tone={stats.observedAccuracy != null && stats.auditSamples >= 20 && stats.observedAccuracy < stats.accuracyTarget ? "text-amber-600" : "text-green-600"}
+              hint={stats.auditSamples >= 20 ? `from ${stats.auditSamples} random audits (30 days) · standard ${Math.round(stats.accuracyTarget * 100)}–95%` : `standard · measuring (${stats.auditSamples} random audits so far)`}
+            />
           </>
         )}
       </div>

@@ -1,6 +1,6 @@
 import { pool } from "../db/pool.js";
 import { parseNpaNxx } from "../utils/phone.js";
-import { resolveOne, type Resolution, type Source } from "./phoneIntel/engine.js";
+import { accuracyTarget, resolveOne, type Resolution, type Source } from "./phoneIntel/engine.js";
 import { carrierLabel } from "./phoneIntel/normalize.js";
 
 
@@ -112,6 +112,8 @@ export async function getCoverageStats(organizationId: string) {
     correctPredictions: q.rows[0].ok,
     incorrectPredictions: n - q.rows[0].ok,
     observedAccuracy: n > 0 ? q.rows[0].ok / n : null,
+    auditSamples: n,
+    accuracyTarget: await accuracyTarget(organizationId),
     // Share of the last 30 days' lookups the engine answered without Twilio.
     engineShare30d: l.n30 ? l.engine30 / l.n30 : null,
   };

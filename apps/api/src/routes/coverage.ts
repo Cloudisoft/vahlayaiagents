@@ -223,8 +223,8 @@ coverageRouter.get("/intelligence", async (req: AuthedRequest, res) => {
 });
 
 coverageRouter.put("/intelligence/target", requireRole("company_admin"), async (req: AuthedRequest, res) => {
-  const parsed = z.object({ target: z.number().min(0.8).max(0.99) }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Choose a target between 80% and 99%." });
+  const parsed = z.object({ target: z.number().min(0.93).max(0.95) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a target between 93% and 95%." });
   await pool.query(
     `insert into coverage_budgets (organization_id, accuracy_target) values ($1, $2)
      on conflict (organization_id) do update set accuracy_target = excluded.accuracy_target, updated_at = now()`,
