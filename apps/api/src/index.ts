@@ -34,7 +34,7 @@ import { dashboardRouter } from "./routes/dashboard.js";
 import { usageRouter } from "./routes/usage.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { initRealtime } from "./services/realtimeService.js";
-import { warmPool } from "./db/pool.js";
+import { pool, warmPool } from "./db/pool.js";
 import { authRateLimit, publicRateLimit } from "./middleware/rateLimit.js";
 
 const app = express();
@@ -102,7 +102,7 @@ if (existsSync(webDist)) {
   });
 }
 
-app.use((err: Error & { code?: string }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: Error & { code?: string }, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   // Malformed ids/values from the client (bad uuid, enum, number…) are 400s.
   if (err.code && ["22P02", "22007", "22008", "22003", "23502", "23503"].includes(err.code)) {
     return res.status(400).json({ error: "Invalid request." });
@@ -114,6 +114,15 @@ app.use((err: Error & { code?: string }, _req: express.Request, res: express.Res
   if ((err as any).type === "entity.parse.failed") return res.status(400).json({ error: "Invalid JSON body." });
   if ((err as any).type === "entity.too.large") return res.status(413).json({ error: "Request is too large." });
   console.error(err);
+  // Kept server-side for admins (Settings → System health); never sent to the browser.
+  const org = (req as express.Request & { auth?: { organizationId?: string } }).auth?.organizationId ?? null;
+  pool
+    .query("insert into system_logs (organization_id, level, source, message, metadata) values ($1,'error','http',$2,$3)", [
+      org,
+      String(err.message ?? err).slice(0, 2000),
+      JSON.stringify({ method: req.method, path: req.path, stack: String(err.stack ?? "").slice(0, 3000) }),
+    ])
+    .catch(() => undefined);
   res.status(500).json({ error: env.nodeEnv === "production" ? "Internal server error." : err.message });
 });
 

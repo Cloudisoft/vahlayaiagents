@@ -255,3 +255,15 @@ orgRouter.delete("/users/:id", requireRole("company_admin"), async (req: AuthedR
   await pool.query("delete from users where id = $1 and organization_id = $2", [req.params.id, req.auth!.organizationId]);
   res.status(204).end();
 });
+
+// System health: recent server errors for this organisation (admins only).
+orgRouter.get("/system-logs", requireRole("company_admin"), async (req: AuthedRequest, res) => {
+  const r = await pool.query(
+    `select id, level, source, message, metadata - 'stack' as metadata, created_at,
+            case when $2 then metadata->>'stack' end as stack
+     from system_logs where (organization_id = $1 or organization_id is null) and level in ('error','warn')
+     order by created_at desc limit 100`,
+    [req.auth!.organizationId, req.query.stack === "1"]
+  );
+  res.json({ logs: r.rows });
+});
