@@ -28,6 +28,30 @@ export interface Resolution {
   prefixTrust: string | null;
   portabilityDetected?: boolean;
   reasons: string[];
+  // Precision mode: below the accuracy target the type isn't asserted;
+  // the best guess is kept here instead.
+  withheld?: boolean;
+  likelyLineType?: LineType;
+}
+
+export const DEFAULT_ACCURACY_TARGET = 0.93;
+export async function accuracyTarget(organizationId: string): Promise<number> {
+  const r = await pool.query("select accuracy_target from coverage_budgets where organization_id = $1", [organizationId]);
+  const t = Number(r.rows[0]?.accuracy_target);
+  return Number.isFinite(t) && t > 0.5 && t < 1 ? t : DEFAULT_ACCURACY_TARGET;
+}
+
+// Only answers measured to be right at least `target` of the time are
+// classified; the rest say "unknown" with their best guess alongside.
+export function applyTarget(r: Resolution, target: number): Resolution {
+  if (r.verified || r.lineType === "unknown" || r.confidence >= target) return r;
+  return {
+    ...r,
+    withheld: true,
+    likelyLineType: r.lineType,
+    lineType: "unknown",
+    reasons: [...r.reasons, `Not classified: ${Math.round(r.confidence * 100)}% is below the ${Math.round(target * 100)}% accuracy target`],
+  };
 }
 
 // Answers below this go to Twilio when budget allows.
@@ -190,7 +214,7 @@ export function resolveLocal(e164: string, ctx: Context): Resolution {
 }
 
 // Why a local answer deserves a Twilio check.
-export function verificationReason(r: Resolution, ctx: Context): string | null {
+export function verificationReason(r: Resolution, ctx: Context, target = VERIFY_BELOW): string | null {
   if (r.verified) return null;
   const rec = ctx.phones.get(r.phone);
   const prefix = r.npa ? ctx.prefixes.get(r.npa + r.nxx!) : null;
@@ -199,7 +223,7 @@ export function verificationReason(r: Resolution, ctx: Context): string | null {
   if (rec?.conflicts > 0) return "conflicting_history";
   if (prefix.trust === "drifting") return "prefix_drifting";
   if (r.source === "phone_record" && ageDays(rec?.observed_at) > 365) return "stale_record";
-  if (r.confidence < VERIFY_BELOW) return "low_confidence";
+  if (r.confidence < Math.max(VERIFY_BELOW, target)) return "low_confidence";
   return null;
 }
 
@@ -321,10 +345,12 @@ export async function resolveOne(organizationId: string, raw: string, opts: { fo
   const e164 = normalizeE164(raw);
   if (!e164) return { e164: null, resolution: null, budgetExceeded: false, error: "Not a valid phone number." };
   const ctx = await loadContext([e164]);
-  const local = resolveLocal(e164, ctx);
-  const reason = opts.forceVerify ? "forced" : verificationReason(local, ctx);
+  const target = await accuracyTarget(organizationId);
+  const guess = resolveLocal(e164, ctx);
+  const local = applyTarget(guess, target);
+  const reason = opts.forceVerify ? "forced" : verificationReason(guess, ctx, target);
   if (reason) {
-    const t = await tryTwilio(organizationId, e164, local, "correction");
+    const t = await tryTwilio(organizationId, e164, guess, "correction");
     if (t.resolution) return { e164, resolution: t.resolution, budgetExceeded: false, error: null };
     await countLocal(organizationId, 1);
     return { e164, resolution: local, budgetExceeded: t.budgetExceeded, error: t.error };
@@ -332,7 +358,7 @@ export async function resolveOne(organizationId: string, raw: string, opts: { fo
   // Confident local answer: occasionally audited so accuracy is measured,
   // not assumed. Audits may use at most AUDIT_SHARE of the day's budget.
   if (Math.random() < AUDIT_RATE && (await auditRoom(organizationId))) {
-    const t = await tryTwilio(organizationId, e164, local, "audit");
+    const t = await tryTwilio(organizationId, e164, guess, "audit");
     if (t.resolution) return { e164, resolution: t.resolution, budgetExceeded: false, error: null };
   }
   await countLocal(organizationId, 1);
@@ -348,6 +374,8 @@ export interface BulkSummary {
   localResolved: number;
   budgetExceeded: boolean;
   twilioError: string | null;
+  withheld: number;
+  accuracyTarget: number;
   bySource: Record<string, number>;
   byLineType: Record<string, number>;
   costUsd: number;
@@ -367,13 +395,14 @@ export async function resolveBulk(
   const CHUNK = 5000;
   const resolved = new Map<string, Resolution>();
   const reasons = new Map<string, string>();
+  const target = await accuracyTarget(organizationId);
   for (let i = 0; i < unique.length; i += CHUNK) {
     const part = unique.slice(i, i + CHUNK);
     const ctx = await loadContext(part);
     for (const p of part) {
       const r = resolveLocal(p, ctx);
       resolved.set(p, r);
-      const why = verificationReason(r, ctx);
+      const why = verificationReason(r, ctx, target);
       if (why) reasons.set(p, why);
     }
   }
@@ -441,10 +470,13 @@ export async function resolveBulk(
     }
   }
 
+  for (const [p, r] of resolved) resolved.set(p, applyTarget(r, target));
   await countLocal(organizationId, unique.length - twilio);
   const bySource: Record<string, number> = {};
   const byLineType: Record<string, number> = {};
+  let withheld = 0;
   for (const r of resolved.values()) {
+    if (r.withheld) withheld++;
     bySource[r.source] = (bySource[r.source] ?? 0) + 1;
     byLineType[r.lineType] = (byLineType[r.lineType] ?? 0) + 1;
   }
@@ -464,6 +496,8 @@ export async function resolveBulk(
       localResolved: unique.length - twilio,
       budgetExceeded,
       twilioError,
+      withheld,
+      accuracyTarget: target,
       bySource,
       byLineType,
       costUsd: twilio * budget.priceUsd,

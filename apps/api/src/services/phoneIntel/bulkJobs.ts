@@ -33,10 +33,10 @@ export async function processNextBulkJob(): Promise<boolean> {
     for (let i = 0; i < rows.length; i += BATCH) {
       const part = rows.slice(i, i + BATCH);
       await pool.query(
-        `insert into coverage_bulk_results (job_id, idx, phone_original, phone_e164, line_type, carrier, confidence, source, verified, twilio_used, error)
-         select $1, i, po, pe, lt, ca, cf, so, ve, tu, er
-         from unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::float8[], $8::text[], $9::bool[], $10::bool[], $11::text[])
-           as u(i, po, pe, lt, ca, cf, so, ve, tu, er)
+        `insert into coverage_bulk_results (job_id, idx, phone_original, phone_e164, line_type, carrier, confidence, source, verified, twilio_used, error, likely_line_type)
+         select $1, i, po, pe, lt, ca, cf, so, ve, tu, er, ll
+         from unnest($2::int[], $3::text[], $4::text[], $5::text[], $6::text[], $7::float8[], $8::text[], $9::bool[], $10::bool[], $11::text[], $12::text[])
+           as u(i, po, pe, lt, ca, cf, so, ve, tu, er, ll)
          on conflict do nothing`,
         [
           job.id,
@@ -50,6 +50,7 @@ export async function processNextBulkJob(): Promise<boolean> {
           part.map((r) => r.resolution?.verified ?? false),
           part.map((r) => r.resolution?.twilioUsed ?? false),
           part.map((r) => r.error),
+          part.map((r) => r.resolution?.likelyLineType ?? null),
         ]
       );
       await pool.query("update coverage_bulk_jobs set processed = $2, locked_at = now() where id = $1", [job.id, Math.min(rows.length, i + BATCH)]);

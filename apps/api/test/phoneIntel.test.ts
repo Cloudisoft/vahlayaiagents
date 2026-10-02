@@ -80,3 +80,16 @@ test("conflicting history and drifting prefixes ask for validation", () => {
   assert.equal(unknown.source, "unknown");
   assert.equal(verificationReason(unknown, ctx()), "new_number");
 });
+
+import { applyTarget } from "../src/services/phoneIntel/engine.js";
+test("precision mode: below-target answers are not classified, guesses kept", () => {
+  const base = { phone: "+14078565290", npa: "407", nxx: "856", carrier: null, verified: false, twilioUsed: false, prefixTrust: "probable", reasons: [] } as any;
+  const low = applyTarget({ ...base, lineType: "mobile", confidence: 0.7, source: "prefix_intelligence" }, 0.93);
+  assert.equal(low.lineType, "unknown");
+  assert.equal(low.likelyLineType, "mobile");
+  assert.equal(low.withheld, true);
+  const high = applyTarget({ ...base, lineType: "landline", confidence: 0.96, source: "phone_record" }, 0.93);
+  assert.equal(high.lineType, "landline");
+  const verified = applyTarget({ ...base, lineType: "voip", confidence: 1, source: "twilio_validated", verified: true }, 0.99);
+  assert.equal(verified.lineType, "voip");
+});

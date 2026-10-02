@@ -26,6 +26,8 @@ export interface CoverageLookupResult {
   prefixTrust: string | null;
   portabilityDetected?: boolean;
   reasons?: string[];
+  withheld?: boolean;
+  likelyLineType?: string | null;
 }
 
 export function toLookupResult(original: string, e164: string | null, r: Resolution | null, extra: { budgetExceeded: boolean; error?: string | null }): CoverageLookupResult {
@@ -48,6 +50,8 @@ export function toLookupResult(original: string, e164: string | null, r: Resolut
     prefixTrust: r?.prefixTrust ?? null,
     portabilityDetected: r?.portabilityDetected,
     reasons: r?.reasons,
+    withheld: r?.withheld,
+    likelyLineType: r?.likelyLineType ?? null,
     budgetExceeded: extra.budgetExceeded,
     ...(extra.error ? { error: extra.error } : {}),
   };

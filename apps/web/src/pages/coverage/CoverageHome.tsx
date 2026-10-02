@@ -18,6 +18,8 @@ interface LookupResult {
   prefixTrust?: string | null;
   portabilityDetected?: boolean;
   reasons?: string[];
+  withheld?: boolean;
+  likelyLineType?: string | null;
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -180,7 +182,17 @@ export default function CoverageHome() {
           <div className="mt-4 bg-slate-50 rounded-md p-4 text-sm space-y-1">
             <div><span className="text-slate-500">Normalized: </span>{result.phoneE164 || "invalid"}</div>
             <div><span className="text-slate-500">Carrier: </span>{result.predictedCarrier ?? "unknown"}</div>
-            <div><span className="text-slate-500">Line type: </span>{result.lineType ?? "unknown"}</div>
+            <div>
+              <span className="text-slate-500">Line type: </span>
+              {result.withheld ? (
+                <>
+                  <span className="text-xs rounded-full bg-amber-100 text-amber-800 px-2 py-0.5">Not classified</span>
+                  <span className="text-slate-500 text-xs ml-2">best guess: {result.likelyLineType} ({Math.round((result.confidence ?? 0) * 100)}%)</span>
+                </>
+              ) : (
+                result.lineType ?? "unknown"
+              )}
+            </div>
             <div><span className="text-slate-500">Status: </span>{result.verificationStatus}{result.verified && <span className="ml-2 text-xs rounded-full bg-green-100 text-green-800 px-2 py-0.5">Verified</span>}</div>
             <div><span className="text-slate-500">Confidence: </span>{result.confidence !== null ? `${Math.round(result.confidence * 100)}%` : "—"}</div>
             {result.source && (
@@ -300,6 +312,11 @@ function IntelligencePanel() {
         <p>
           Bulk files work the same way: numbers are answered from intelligence first, and live checks are spent only where they teach
           the most. The confidence shown with each result is how often answers like it have been right.
+        </p>
+        <p>
+          Accuracy comes first: a line type is only stated when answers like it are right at least 93% of the time (or Twilio has
+          verified it). Anything less certain is marked "Not classified" and its best guess is shown beside it, so the line types you
+          rely on stay at 93–95% accuracy.
         </p>
       </div>
       {isAdmin && (

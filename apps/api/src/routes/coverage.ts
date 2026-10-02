@@ -114,7 +114,7 @@ coverageRouter.get("/lookup/bulk/:id/results.csv", async (req: AuthedRequest, re
   const j = await pool.query("select file_name from coverage_bulk_jobs where id = $1 and organization_id = $2", [req.params.id, req.auth!.organizationId]);
   if (!j.rows[0]) return res.status(404).json({ error: "Job not found." });
   const r = await pool.query(
-    `select phone_original, phone_e164, line_type, carrier, round((confidence * 100)::numeric) as confidence_pct, source, verified, twilio_used, error
+    `select phone_original, phone_e164, line_type, carrier, round((confidence * 100)::numeric) as confidence_pct, likely_line_type, source, verified, twilio_used, error
      from coverage_bulk_results where job_id = $1 order by idx`,
     [req.params.id]
   );
@@ -188,6 +188,17 @@ coverageRouter.get("/intelligence", async (req: AuthedRequest, res) => {
     budgetToday: budget,
     last30d: { spentUsd: u.spent, lookups: u.lookups, twilioLookups: u.twilio, costPer1000: u.lookups ? (u.spent / u.lookups) * 1000 : null },
   });
+});
+
+coverageRouter.put("/intelligence/target", requireRole("company_admin"), async (req: AuthedRequest, res) => {
+  const parsed = z.object({ target: z.number().min(0.8).max(0.99) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a target between 80% and 99%." });
+  await pool.query(
+    `insert into coverage_budgets (organization_id, accuracy_target) values ($1, $2)
+     on conflict (organization_id) do update set accuracy_target = excluded.accuracy_target, updated_at = now()`,
+    [req.auth!.organizationId, parsed.data.target]
+  );
+  res.json({ target: parsed.data.target });
 });
 
 coverageRouter.put("/intelligence/price", requireRole("company_admin"), async (req: AuthedRequest, res) => {
